@@ -6,7 +6,7 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
     />
-    <title>How Many Nassers Can You Hug?</title>
+    <title>How Many Bayats Can You Hug?</title>
     <style>
       :root {
         --base: #120e1c;
@@ -1030,7 +1030,7 @@
         <div class="title-wrap">
           <div class="kicker">▮ a hugging survivors game ▮</div>
           <h1 class="game-title">
-            HOW MANY <span class="accent">NASSERS</span><br />CAN YOU HUG?
+            HOW MANY <span class="accent">BAYATS</span><br />CAN YOU HUG?
           </h1>
           <div class="subtitle">
             chase &middot; catch &middot; hug &middot; survive
@@ -1066,9 +1066,9 @@
         <div class="panel">
           <h2>How To Play</h2>
           <p>
-            Nassers are scattered across the arena and they do <b>not</b> want
-            to be hugged. Chase them down, get close, and hug them before time
-            runs out.
+            Bayats are scattered across the arena and they do <b>not</b> want to
+            be hugged. Chase them down, get close, and hug them before time runs
+            out.
           </p>
           <div class="htp-grid">
             <div class="htp-item"><b>Move</b>WASD or Arrow Keys</div>
@@ -1078,18 +1078,18 @@
           </div>
           <h3>Arcade Mode</h3>
           <p>
-            You get 60 seconds. Hug as many Nassers as possible. You
+            You get 60 seconds. Hug as many Bayats as possible. You
             automatically get stronger as you level up &mdash; no choices, just
             chaos.
           </p>
           <h3>Full Game Mode</h3>
           <p>
-            Instead of health, you have a countdown timer. Hugging Nassers adds
+            Instead of health, you have a countdown timer. Hugging Bayats adds
             time back &mdash; but the bonus shrinks the longer you survive, so
             you'll always need the next hug. Level up to choose upgrades and
             unlock tools.
           </p>
-          <h3>Nasser Types</h3>
+          <h3>Bayat Types</h3>
           <ul>
             <li><b>Normal</b> &mdash; balanced.</li>
             <li><b>Fast »</b> &mdash; hard to catch, worth more.</li>
@@ -1303,14 +1303,14 @@
    ========================================================= */
         const ASSETS = {
           player: "assets/gohid.png",
-          nasser: "assets/diser.png",
+          bayat: "assets/nanbaiat.png",
         };
 
         const Sprites = {
           player: null,
-          nasser: null,
+          bayat: null,
           playerLoaded: false,
-          nasserLoaded: false,
+          bayatLoaded: false,
         };
         function loadSprite(key, src) {
           const img = new Image();
@@ -1324,7 +1324,7 @@
           Sprites[key] = img;
         }
         loadSprite("player", ASSETS.player);
-        loadSprite("nasser", ASSETS.nasser);
+        loadSprite("bayat", ASSETS.bayat);
 
         /* =========================================================
    UTILITIES
@@ -1410,18 +1410,18 @@
             minInterval: 0.22,
             rampDuration: 220,
           },
-          nasserBaseSpeed: 118,
-          nasserBaseRadius: 20,
+          bayatBaseSpeed: 118,
+          bayatBaseRadius: 20,
         };
 
-        /* Nasser types: visual identity is created entirely from ONE base PNG.
+        /* Bayat types: visual identity is created entirely from ONE base PNG.
    Color variants are produced by SpriteTint (see below), which recolors
    only the visible (alpha>0) pixels of the sprite and leaves transparent
    pixels fully transparent — no colored fringing, no filter hacks. */
-        const NASSER_TYPES = {
+        const BAYAT_TYPES = {
           normal: {
             key: "normal",
-            label: "Nasser",
+            label: "Bayat",
             speedMult: 1.0,
             sizeMult: 1.0,
             expMult: 1.0,
@@ -1442,7 +1442,7 @@
           },
           fast: {
             key: "fast",
-            label: "Fast Nasser",
+            label: "Fast Bayat",
             speedMult: 1.75,
             sizeMult: 0.88,
             expMult: 1.35,
@@ -1463,7 +1463,7 @@
           },
           slow: {
             key: "slow",
-            label: "Slow Nasser",
+            label: "Slow Bayat",
             speedMult: 0.55,
             sizeMult: 1.12,
             expMult: 0.7,
@@ -1484,7 +1484,7 @@
           },
           tiny: {
             key: "tiny",
-            label: "Tiny Nasser",
+            label: "Tiny Bayat",
             speedMult: 1.25,
             sizeMult: 0.55,
             expMult: 1.25,
@@ -1505,7 +1505,7 @@
           },
           giant: {
             key: "giant",
-            label: "Giant Nasser",
+            label: "Giant Bayat",
             speedMult: 0.42,
             sizeMult: 1.9,
             expMult: 1.9,
@@ -1526,7 +1526,7 @@
           },
           dangerous: {
             key: "dangerous",
-            label: "DANGEROUS Nasser",
+            label: "DANGEROUS Bayat",
             speedMult: 0.55,
             sizeMult: 1.0,
             expMult: 0.0,
@@ -1547,7 +1547,7 @@
           },
           golden: {
             key: "golden",
-            label: "GOLDEN Nasser",
+            label: "GOLDEN Bayat",
             speedMult: 2.1,
             sizeMult: 0.85,
             expMult: 4.2,
@@ -1659,7 +1659,7 @@
             name: "Black Hole",
             icon: "🕳️",
             maxLevel: 3,
-            desc: (l) => `Pulls nearby Nassers toward you (str ${l})`,
+            desc: (l) => `Pulls nearby Bayats toward you (str ${l})`,
             apply: (p, l) => {
               p.blackHoleLevel = l;
             },
@@ -1679,7 +1679,7 @@
             name: "Four Leaf Clover",
             icon: "🍀",
             maxLevel: 4,
-            desc: (l) => `+${12 * l}% luck (rarer Nassers appear more)`,
+            desc: (l) => `+${12 * l}% luck (rarer Bayats appear more)`,
             apply: (p, l) => {
               p.luckMult = 1 + 0.12 * l;
             },
@@ -1690,7 +1690,7 @@
             icon: "🫳",
             maxLevel: 4,
             desc: (l) =>
-              `Nassers that get close to your hug range are slowed down (Lv${l})`,
+              `Bayats that get close to your hug range are slowed down (Lv${l})`,
             apply: (p, l) => {
               p.stickyArmsLevel = l;
             },
@@ -1745,7 +1745,7 @@
             icon: "👯",
             maxLevel: 3,
             desc: (l) =>
-              `${8 * l}% chance to catch a second nearby Nasser in one hug`,
+              `${8 * l}% chance to catch a second nearby Bayat in one hug`,
             apply: (p, l) => {
               p.doubleHugChance = 0.08 * l;
             },
@@ -1817,7 +1817,7 @@
             name: "Thick Skin",
             icon: "🛡️",
             maxLevel: 4,
-            desc: (l) => `Dangerous Nassers cost you ${20 * l}% less time`,
+            desc: (l) => `Dangerous Bayats cost you ${20 * l}% less time`,
             apply: (p, l) => {
               p.thickSkinMult = 1 - Math.min(0.8, 0.2 * l);
             },
@@ -1832,7 +1832,7 @@
             maxLevel: 5,
             baseCooldown: 3.2,
             desc: (l) =>
-              `Yanks ${1 + Math.floor(l / 2)} nearby Nasser(s) to you.`,
+              `Yanks ${1 + Math.floor(l / 2)} nearby Bayat(s) to you.`,
             range: (l) => 320 + l * 50,
             targets: (l) => 1 + Math.floor(l / 2),
           },
@@ -1842,7 +1842,7 @@
             icon: "🍰",
             maxLevel: 5,
             baseCooldown: 5.5,
-            desc: (l) => `Drops a tasty cake that pulls nearby Nassers in.`,
+            desc: (l) => `Drops a tasty cake that pulls nearby Bayats in.`,
             range: (l) => 170 + l * 35,
           },
           {
@@ -1851,7 +1851,7 @@
             icon: "🪢",
             maxLevel: 5,
             baseCooldown: 6.0,
-            desc: (l) => `Throws a snare that drags trapped Nassers to you.`,
+            desc: (l) => `Throws a snare that drags trapped Bayats to you.`,
             range: (l) => 220 + l * 40,
           },
           {
@@ -1869,7 +1869,7 @@
             icon: "💎",
             maxLevel: 5,
             baseCooldown: 9.0,
-            desc: (l) => `Freezes every Nasser around you briefly.`,
+            desc: (l) => `Freezes every Bayat around you briefly.`,
             range: (l) => 190 + l * 30,
           },
           {
@@ -1878,7 +1878,7 @@
             icon: "❄️",
             maxLevel: 5,
             baseCooldown: 4.5,
-            desc: (l) => `Lobs a slow zone at the nearest Nasser crowd.`,
+            desc: (l) => `Lobs a slow zone at the nearest Bayat crowd.`,
             range: (l) => 260 + l * 40,
           },
           {
@@ -1887,7 +1887,7 @@
             icon: "🌀",
             maxLevel: 5,
             baseCooldown: 6.0,
-            desc: (l) => `Sucks up to ${3 + l * 2} Nassers in a wide radius.`,
+            desc: (l) => `Sucks up to ${3 + l * 2} Bayats in a wide radius.`,
             range: (l) => 260 + l * 45,
           },
           {
@@ -1905,7 +1905,7 @@
             icon: "🪃",
             maxLevel: 5,
             baseCooldown: 5.0,
-            desc: (l) => `Flies out and yanks Nassers back with it on return.`,
+            desc: (l) => `Flies out and yanks Bayats back with it on return.`,
             range: (l) => 300 + l * 40,
           },
           {
@@ -1914,7 +1914,7 @@
             icon: "🥅",
             maxLevel: 5,
             baseCooldown: 6.5,
-            desc: (l) => `Traps nearby Nassers in place briefly.`,
+            desc: (l) => `Traps nearby Bayats in place briefly.`,
             range: (l) => 200 + l * 30,
           },
           {
@@ -1923,7 +1923,7 @@
             icon: "🍌",
             maxLevel: 5,
             baseCooldown: 5.5,
-            desc: (l) => `Nassers slip on it and stumble toward you.`,
+            desc: (l) => `Bayats slip on it and stumble toward you.`,
             range: (l) => 230 + l * 35,
           },
           {
@@ -1932,7 +1932,7 @@
             icon: "🌟",
             maxLevel: 5,
             baseCooldown: 10.0,
-            desc: (l) => `Warps you straight to the nearest Nasser crowd.`,
+            desc: (l) => `Warps you straight to the nearest Bayat crowd.`,
             range: (l) => 700 + l * 80,
           },
           {
@@ -1941,7 +1941,7 @@
             icon: "⏰",
             maxLevel: 5,
             baseCooldown: 8.0,
-            desc: (l) => `Startles and slows every Nasser nearby.`,
+            desc: (l) => `Startles and slows every Bayat nearby.`,
             range: (l) => 320 + l * 45,
           },
 
@@ -1953,7 +1953,7 @@
             maxLevel: 5,
             kind: "aura",
             desc: (l) =>
-              `Constant aura slows Nassers & gently pushes Dangerous ones away.`,
+              `Constant aura slows Bayats & gently pushes Dangerous ones away.`,
             range: (l) => 110 + l * 18,
           },
           {
@@ -1987,7 +1987,7 @@
             baseCooldown: 6.5,
             kind: "projectile",
             desc: (l) =>
-              `Lobbed at the Nasser crowd; explodes into a pulling blast + lingering zone.`,
+              `Lobbed at the Bayat crowd; explodes into a pulling blast + lingering zone.`,
             range: (l) => 340 + l * 40,
             travel: 0.5,
           },
@@ -1998,7 +1998,7 @@
             maxLevel: 5,
             baseCooldown: 5.0,
             desc: (l) =>
-              `Zaps ${1 + Math.floor(l / 2)} random nearby Nassers, yanking them to you instantly.`,
+              `Zaps ${1 + Math.floor(l / 2)} random nearby Bayats, yanking them to you instantly.`,
             range: (l) => 300 + l * 40,
             targets: (l) => 1 + Math.floor(l / 2),
           },
@@ -2010,7 +2010,7 @@
             baseCooldown: 4.2,
             kind: "missile",
             desc: (l) =>
-              `Homes in on the nearest Nasser and reels it in on arrival.`,
+              `Homes in on the nearest Bayat and reels it in on arrival.`,
             range: (l) => 500 + l * 60,
             travel: 0.6,
           },
@@ -2034,7 +2034,7 @@
             baseCooldown: 9.0,
             kind: "zone",
             desc: (l) =>
-              `Leaves a lingering cloud that slows any Nasser standing in it.`,
+              `Leaves a lingering cloud that slows any Bayat standing in it.`,
             range: (l) => 170 + l * 25,
             zoneDuration: (l) => 3 + l * 0.8,
           },
@@ -2130,7 +2130,7 @@
               { id: "snowball", minLevel: 3 },
               { id: "stickyarms", minLevel: 3 },
             ],
-            desc: "Hugging a frozen Nasser gives +40% bonus reward.",
+            desc: "Hugging a frozen Bayat gives +40% bonus reward.",
           },
           {
             id: "bladeStorm",
@@ -2150,7 +2150,7 @@
               { id: "staticcling", minLevel: 3 },
               { id: "longarms", minLevel: 3 },
             ],
-            desc: "Static Cling zaps 2 extra Nassers per cast.",
+            desc: "Static Cling zaps 2 extra Bayats per cast.",
           },
         ];
 
@@ -2303,15 +2303,15 @@
             spawnDangerMult: 1,
             chestLuckMult: 1,
             playerSpeedMult: 1,
-            nasserSpeedMult: 1,
+            bayatSpeedMult: 1,
             unlock: null,
           },
           {
             id: "graveyard",
             name: "Haunted Graveyard",
-            desc: "Fog, tombstones, and Nassers that don\u2019t scare easy.",
+            desc: "Fog, tombstones, and Bayats that don\u2019t scare easy.",
             difficulty: "Medium",
-            modifierText: "+35% Dangerous Nasser frequency.",
+            modifierText: "+35% Dangerous Bayat frequency.",
             bg: "#0d0d14",
             accent: "#8a7bbf",
             decorPalette: ["#2b2b38", "#1f1f2c", "#3a3a4a"],
@@ -2320,7 +2320,7 @@
             spawnDangerMult: 1.35,
             chestLuckMult: 1,
             playerSpeedMult: 1,
-            nasserSpeedMult: 1,
+            bayatSpeedMult: 1,
             unlock: { value: 25 },
           },
           {
@@ -2337,7 +2337,7 @@
             spawnDangerMult: 0.9,
             chestLuckMult: 1.5,
             playerSpeedMult: 1,
-            nasserSpeedMult: 1,
+            bayatSpeedMult: 1,
             unlock: { value: 60 },
           },
           {
@@ -2345,7 +2345,7 @@
             name: "Burning Wasteland",
             desc: "Cracked earth and heat haze. Everything moves faster.",
             difficulty: "Hard",
-            modifierText: "+15% Nasser speed, +20% rewards.",
+            modifierText: "+15% Bayat speed, +20% rewards.",
             bg: "#1c0f0a",
             accent: "#ff7a3d",
             decorPalette: ["#3d2416", "#4a2c1a", "#2a1810"],
@@ -2354,7 +2354,7 @@
             spawnDangerMult: 1.15,
             chestLuckMult: 1,
             playerSpeedMult: 1,
-            nasserSpeedMult: 1.15,
+            bayatSpeedMult: 1.15,
             rewardMult: 1.2,
             unlock: { value: 120 },
           },
@@ -2363,7 +2363,7 @@
             name: "Frozen Ruins",
             desc: "Slippery ice and old broken statues. Slow and tense.",
             difficulty: "Hard",
-            modifierText: "-10% player & Nasser speed, longer freezes.",
+            modifierText: "-10% player & Bayat speed, longer freezes.",
             bg: "#0d1620",
             accent: "#9adfff",
             decorPalette: ["#22374a", "#2c4258", "#1a2836"],
@@ -2372,7 +2372,7 @@
             spawnDangerMult: 1,
             chestLuckMult: 1.1,
             playerSpeedMult: 0.9,
-            nasserSpeedMult: 0.9,
+            bayatSpeedMult: 0.9,
             unlock: { value: 200 },
           },
         ];
@@ -2381,10 +2381,10 @@
    SAVE SYSTEM
    ========================================================= */
         const SaveSystem = {
-          KEY_ARCADE: "nasserHug_arcadeHighScore",
-          KEY_FULL: "nasserHug_fullGameBestTime",
-          KEY_SETTINGS: "nasserHug_settings",
-          KEY_LIFETIME: "nasserHug_lifetimeHugs",
+          KEY_ARCADE: "bayatHug_arcadeHighScore",
+          KEY_FULL: "bayatHug_fullGameBestTime",
+          KEY_SETTINGS: "bayatHug_settings",
+          KEY_LIFETIME: "bayatHug_lifetimeHugs",
           // Arena-specific scores live under their own key so old saves keep working —
           // the default 'meadow' arena still reads/writes the original keys.
           arcadeKey(arenaId) {
@@ -3091,23 +3091,23 @@
         }
 
         /* =========================================================
-   NASSER
+   BAYAT
    ========================================================= */
-        let NASSER_UID = 1;
-        class Nasser {
+        let BAYAT_UID = 1;
+        class Bayat {
           constructor(type, x, y, difficulty) {
-            this.id = NASSER_UID++;
+            this.id = BAYAT_UID++;
             this.type = type;
             this.x = x;
             this.y = y;
             this.vx = 0;
             this.vy = 0;
-            this.radius = CONFIG.nasserBaseRadius * type.sizeMult;
+            this.radius = CONFIG.bayatBaseRadius * type.sizeMult;
             this.baseSpeed =
-              CONFIG.nasserBaseSpeed *
+              CONFIG.bayatBaseSpeed *
               type.speedMult *
               (1 + difficulty * 0.35) *
-              (Game.arena ? Game.arena.nasserSpeedMult : 1);
+              (Game.arena ? Game.arena.bayatSpeedMult : 1);
             this.wanderAngle = Math.random() * TAU;
             this.animT = Math.random() * 10;
             this.frozenT = 0;
@@ -3257,7 +3257,7 @@
             ctx.fillStyle = "rgba(0,0,0,.32)";
             ctx.fill();
 
-            if (Sprites.nasserLoaded) {
+            if (Sprites.bayatLoaded) {
               ctx.save();
               const size = this.radius * 2.9;
               ctx.imageSmoothingEnabled = false;
@@ -3272,14 +3272,14 @@
               // (and partially-transparent edge pixels) are left exactly as they were.
               const tinted =
                 this.frozenT > 0
-                  ? SpriteTint.getTinted("nasser", "#9adfff", 0.55)
+                  ? SpriteTint.getTinted("bayat", "#9adfff", 0.55)
                   : SpriteTint.getTinted(
-                      "nasser",
+                      "bayat",
                       this.type.tintColor,
                       this.type.tintStrength,
                     );
               ctx.drawImage(
-                tinted || Sprites.nasser,
+                tinted || Sprites.bayat,
                 -size / 2,
                 -size / 2,
                 size,
@@ -3288,7 +3288,7 @@
               ctx.shadowBlur = 0;
               ctx.restore();
             } else {
-              // ---- procedural fallback (used if nasser.png fails to load) ----
+              // ---- procedural fallback (used if bayat.png fails to load) ----
               if (this.type.glow) {
                 ctx.shadowColor = "#ffd76a";
                 ctx.shadowBlur = 22;
@@ -3404,9 +3404,9 @@
         }
 
         /* =========================================================
-   NASSER MANAGER
+   BAYAT MANAGER
    ========================================================= */
-        class NasserManager {
+        class BayatManager {
           constructor() {
             this.list = [];
             this.spawnTimer = 0;
@@ -3420,8 +3420,8 @@
           }
           pickType(diff, luck) {
             const pool = [];
-            for (const key in NASSER_TYPES) {
-              const t = NASSER_TYPES[key];
+            for (const key in BAYAT_TYPES) {
+              const t = BAYAT_TYPES[key];
               if (diff < t.minDiff) continue;
               let w = t.weightBase;
               if (t.key === "golden") w *= luck;
@@ -3453,7 +3453,7 @@
               );
               tries++;
             } while (dist(x, y, player.x, player.y) < 300 && tries < 8);
-            const n = new Nasser(type, x, y, diff);
+            const n = new Bayat(type, x, y, diff);
             this.list.push(n);
             if (type.key === "golden") Game.onGoldenEvent();
             return n;
@@ -3621,21 +3621,21 @@
               this.active[def.id] = { def, level: 0, cd: 0 };
             this.active[def.id].level = level;
           }
-          update(dt, player, nasserManager) {
+          update(dt, player, bayatManager) {
             for (const id in this.active) {
               const t = this.active[id];
               if (t.def.kind === "aura") {
-                this.tickAura(t, dt, player, nasserManager);
+                this.tickAura(t, dt, player, bayatManager);
                 continue;
               }
               if (t.def.kind === "orbit") {
-                this.tickOrbit(t, dt, player, nasserManager);
+                this.tickOrbit(t, dt, player, bayatManager);
                 continue;
               }
               if (!t.def.baseCooldown) continue;
               t.cd -= dt;
               if (t.cd <= 0) {
-                this.fire(t, player, nasserManager);
+                this.fire(t, player, bayatManager);
                 t.cd =
                   t.def.baseCooldown * player.cooldownMult * rand(0.96, 1.04);
               }
@@ -3649,7 +3649,7 @@
                 if (!n.type.danger) {
                   n.slowT = Math.max(n.slowT, 0.2);
                 } else {
-                  // gently push dangerous nassers back out of the aura
+                  // gently push dangerous bayats back out of the aura
                   const a = Math.atan2(n.y - player.y, n.x - player.x);
                   n.x += Math.cos(a) * 40 * dt;
                   n.y += Math.sin(a) * 40 * dt;
@@ -4712,13 +4712,13 @@
               mode === "arcade" ? "Time\u2019s Up!" : "Game Over";
             const rows = [];
             if (mode === "arcade") {
-              rows.push(["Nassers Hugged", stats.hugs]);
+              rows.push(["Bayats Hugged", stats.hugs]);
               rows.push(["Highest Combo", "x" + stats.maxCombo]);
               rows.push(["Level Reached", stats.level]);
               rows.push(["Best Score", SaveSystem.getArcadeBest()]);
             } else {
               rows.push(["Survived", fmtTime(stats.survived) + "s"]);
-              rows.push(["Nassers Hugged", stats.hugs]);
+              rows.push(["Bayats Hugged", stats.hugs]);
               rows.push(["Highest Combo", "x" + stats.maxCombo]);
               rows.push(["Level Reached", stats.level]);
               rows.push(["Best Time", fmtTime(SaveSystem.getFullBest()) + "s"]);
@@ -4741,7 +4741,7 @@
           ctx: null,
           camera: null,
           player: null,
-          nassers: null,
+          bayats: null,
           particles: null,
           exp: null,
           upgrades: null,
@@ -5025,7 +5025,7 @@
           startGame(mode) {
             this.mode = mode;
             this.player = new Player();
-            this.nassers = new NasserManager();
+            this.bayats = new BayatManager();
             this.particles = new ParticleSystem();
             this.exp = new ExperienceSystem();
             this.upgrades = new UpgradeSystem();
@@ -5094,7 +5094,7 @@
 
           onGoldenEvent() {
             AudioSystem.golden();
-            UI.toast("\u2728 GOLDEN NASSER! GET HIM! \u2728", 2200);
+            UI.toast("\u2728 GOLDEN BAYAT! GET HIM! \u2728", 2200);
           },
 
           checkMilestones() {
@@ -5108,10 +5108,10 @@
             }
           },
 
-          onHug(nasser, isChainHug) {
-            const type = nasser.type;
-            nasser.alive = false;
-            this.player.triggerHug(nasser.x, nasser.y);
+          onHug(bayat, isChainHug) {
+            const type = bayat.type;
+            bayat.alive = false;
+            this.player.triggerHug(bayat.x, bayat.y);
             AudioSystem.hug(this.combo);
             if (type.glow) AudioSystem.golden();
             if (type.danger) AudioSystem.danger();
@@ -5147,8 +5147,8 @@
                 ? "#ffd76a"
                 : type.color;
             this.particles.burst(
-              nasser.x,
-              nasser.y,
+              bayat.x,
+              bayat.y,
               pcolor,
               type.glow ? 36 : 16,
               { maxSpeed: type.glow ? 260 : 170, minLife: 0.35, maxLife: 0.75 },
@@ -5157,9 +5157,9 @@
             // pixel death-pop: a short, stepped (non-smooth) scale+fade of the actual
             // sprite, tinted to the type's color — this is the "sprite dies" animation
             this.deathFx.push({
-              x: nasser.x,
-              y: nasser.y,
-              radius: nasser.radius,
+              x: bayat.x,
+              y: bayat.y,
+              radius: bayat.radius,
               tintColor: type.tintColor,
               tintStrength: type.tintStrength,
               danger: type.danger,
@@ -5174,15 +5174,15 @@
               this.camera.shake(9, 0.2);
               this.freezeT = 0.06;
               this.shockwaves.push({
-                x: nasser.x,
-                y: nasser.y,
+                x: bayat.x,
+                y: bayat.y,
                 color: "#ffd166",
                 t: 0,
                 duration: 0.32,
                 maxR: 70,
               });
               UI.comboBanner("MEGA HUG!");
-              this.particles.burst(nasser.x, nasser.y, "#ffd166", 24, {
+              this.particles.burst(bayat.x, bayat.y, "#ffd166", 24, {
                 maxSpeed: 220,
                 minLife: 0.3,
                 maxLife: 0.6,
@@ -5192,23 +5192,23 @@
             }
             if (type.glow)
               this.shockwaves.push({
-                x: nasser.x,
-                y: nasser.y,
+                x: bayat.x,
+                y: bayat.y,
                 color: "#ffd76a",
                 t: 0,
                 duration: 0.4,
                 maxR: 90,
               });
 
-            // Bear Hug: small AoE stun ripple on nearby Nassers when you hug one
+            // Bear Hug: small AoE stun ripple on nearby Bayats when you hug one
             if (this.player.bearHugLevel > 0) {
-              const splash = this.nassers.inRadius(
-                nasser.x,
-                nasser.y,
+              const splash = this.bayats.inRadius(
+                bayat.x,
+                bayat.y,
                 60 + this.player.bearHugLevel * 14,
               );
               for (const s of splash) {
-                if (s !== nasser && !s.type.danger)
+                if (s !== bayat && !s.type.danger)
                   s.slowT = Math.max(s.slowT, 0.5);
               }
             }
@@ -5223,16 +5223,16 @@
                 this.player.totalExpMult *
                 rewardMult;
               this.particles.text(
-                nasser.x,
-                nasser.y - 26,
+                bayat.x,
+                bayat.y - 26,
                 type.danger ? "OUCH!" : isMega ? "MEGA HUG!" : "HUG!",
                 type.danger ? "#ff5c72" : isMega ? "#ffd166" : "#fff",
                 isMega ? 22 : 18,
               );
               if (!type.danger) {
                 this.particles.text(
-                  nasser.x,
-                  nasser.y - 8,
+                  bayat.x,
+                  bayat.y - 8,
                   "+" + Math.round(expGain) + " EXP",
                   "#a970ff",
                   13,
@@ -5259,15 +5259,15 @@
               }
               this.timer = clamp(this.timer + timeDelta, 0, this.maxStoredTime);
               this.particles.text(
-                nasser.x,
-                nasser.y - 26,
+                bayat.x,
+                bayat.y - 26,
                 type.danger ? "OUCH!" : isMega ? "MEGA HUG!" : "HUG!",
                 type.danger ? "#ff5c72" : isMega ? "#ffd166" : "#fff",
                 isMega ? 22 : 18,
               );
               this.particles.text(
-                nasser.x,
-                nasser.y - 8,
+                bayat.x,
+                bayat.y - 8,
                 (timeDelta >= 0 ? "+" : "") + timeDelta.toFixed(2) + "s",
                 timeDelta >= 0 ? "#6fe3a3" : "#ff5c72",
                 13,
@@ -5286,21 +5286,21 @@
 
             if (!type.danger) this.checkMilestones();
 
-            // Double Hug: chance to also catch a second nearby Nasser
+            // Double Hug: chance to also catch a second nearby Bayat
             if (
               !isChainHug &&
               !type.danger &&
               this.player.doubleHugChance > 0 &&
               Math.random() < this.player.doubleHugChance
             ) {
-              const second = this.nassers.nearest(
-                nasser.x,
-                nasser.y,
+              const second = this.bayats.nearest(
+                bayat.x,
+                bayat.y,
                 (n) =>
-                  n !== nasser &&
+                  n !== bayat &&
                   n.alive &&
                   !n.type.danger &&
-                  dist(nasser.x, nasser.y, n.x, n.y) <
+                  dist(bayat.x, bayat.y, n.x, n.y) <
                     this.player.hugRadius * 2.2,
               );
               if (second) {
@@ -5560,7 +5560,7 @@
 
           checkHugs() {
             const hr = this.player.hugRadius;
-            for (const n of this.nassers.list) {
+            for (const n of this.bayats.list) {
               if (!n.alive) continue;
               const rr = hr + n.radius * 0.6;
               if (dist2(this.player.x, this.player.y, n.x, n.y) <= rr * rr) {
@@ -5572,7 +5572,7 @@
           applyStickyArms(dt) {
             if (this.player.stickyArmsLevel <= 0) return;
             const range = this.player.hugRadius * 1.5;
-            for (const n of this.nassers.list) {
+            for (const n of this.bayats.list) {
               if (!n.alive || n.type.danger) continue;
               if (
                 dist2(this.player.x, this.player.y, n.x, n.y) <
@@ -5622,7 +5622,7 @@
                 continue;
               }
               if (z.slow) {
-                const targets = this.nassers.inRadius(z.x, z.y, z.r);
+                const targets = this.bayats.inRadius(z.x, z.y, z.r);
                 for (const n of targets) {
                   n.slowT = Math.max(n.slowT, 0.25);
                 }
@@ -5784,14 +5784,14 @@
 
             this.player.update(dt, this.input);
             this.camera.follow(this.player.x, this.player.y, dt);
-            this.nassers.update(
+            this.bayats.update(
               dt,
               this.elapsed,
               this.player,
               this.player.blackHoleLevel,
             );
             if (this.mode === "full")
-              this.tools.update(dt, this.player, this.nassers);
+              this.tools.update(dt, this.player, this.bayats);
             this.chests.update(
               dt,
               this.elapsed,
@@ -6022,7 +6022,7 @@
                 ctx.stroke();
                 ctx.restore();
               } else if (p.kind === "missile") {
-                const target = this.nassers.list.find(
+                const target = this.bayats.list.find(
                   (n) => n.id === p.targetId && n.alive,
                 );
                 const tx = target ? target.x : p.x,
@@ -6044,7 +6044,7 @@
             }
 
             if (this.chests) this.chests.draw(ctx, cam);
-            if (this.nassers) this.nassers.draw(ctx, cam);
+            if (this.bayats) this.bayats.draw(ctx, cam);
 
             // pixel death-pop: 3 discrete stepped frames of the tinted sprite scaling+fading out
             for (const fx of this.deathFx) {
@@ -6061,18 +6061,18 @@
               ctx.save();
               ctx.translate(sx, sy);
               ctx.globalAlpha = fr.alpha;
-              if (Sprites.nasserLoaded) {
+              if (Sprites.bayatLoaded) {
                 const size = fx.radius * 2.9 * fr.scale;
                 ctx.imageSmoothingEnabled = false;
                 const sprite = fx.danger
-                  ? SpriteTint.getTinted("nasser", "#ff2d4d", 0.85)
+                  ? SpriteTint.getTinted("bayat", "#ff2d4d", 0.85)
                   : SpriteTint.getTinted(
-                      "nasser",
+                      "bayat",
                       fx.tintColor,
                       fx.tintStrength,
                     );
                 ctx.drawImage(
-                  sprite || Sprites.nasser,
+                  sprite || Sprites.bayat,
                   -size / 2,
                   -size / 2,
                   size,
