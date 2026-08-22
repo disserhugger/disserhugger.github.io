@@ -6,7 +6,7 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
     />
-    <title>How Many Havas Can You Hug?</title>
+    <title>How Many Nassers Can You Hug?</title>
     <style>
       :root {
         --base: #120e1c;
@@ -557,36 +557,48 @@
       #hud.active {
         display: block;
       }
-      .hud-top {
+      .hud-topbar {
         position: absolute;
-        top: 12px;
-        left: 12px;
-        right: 12px;
+        top: 10px;
+        left: 10px;
+        right: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .hud-top {
         display: flex;
         justify-content: space-between;
         align-items: flex-start;
         gap: 8px;
         flex-wrap: wrap;
       }
+      .hud-stat-group {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
       .hud-block {
-        background: rgba(18, 14, 28, 0.78);
+        background: rgba(18, 14, 28, 0.85);
         border: 2px solid var(--violet-bright);
         border-radius: 0;
-        padding: 6px 12px;
-        min-width: 84px;
-        box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.5);
+        padding: 5px 9px;
+        min-width: 62px;
+        box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.5);
       }
       .hud-label {
-        font-size: 9px;
-        letter-spacing: 2px;
+        font-size: 8px;
+        letter-spacing: 1.5px;
         color: var(--subtext);
         text-transform: uppercase;
+        white-space: nowrap;
       }
       .hud-value {
-        font-size: 20px;
+        font-size: 17px;
         font-weight: 700;
         color: var(--text);
         font-family: var(--font-pixel);
+        line-height: 1.2;
       }
       .hud-value.timer {
         color: var(--amber-bright);
@@ -609,15 +621,12 @@
       }
 
       #expbar-wrap {
-        position: absolute;
-        top: 12px;
-        left: 50%;
-        transform: translateX(-50%);
-        width: min(420px, 46vw);
-        min-width: 200px;
+        width: 100%;
+        max-width: 460px;
+        margin: 0 auto;
       }
       #expbar-bg {
-        height: 14px;
+        height: 12px;
         background: var(--ink);
         border: 2px solid var(--violet-bright);
         overflow: hidden;
@@ -634,10 +643,10 @@
       }
       #level-label {
         text-align: center;
-        font-size: 10px;
+        font-size: 9px;
         color: var(--amber-bright);
-        margin-top: 4px;
-        letter-spacing: 2px;
+        margin-top: 3px;
+        letter-spacing: 1.5px;
         text-transform: uppercase;
       }
 
@@ -691,17 +700,18 @@
         inset: 0;
         z-index: 30;
         display: none;
-        align-items: center;
-        justify-content: center;
         background: rgba(6, 4, 10, 0.8);
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
       }
       #upgrade-modal.show {
-        display: flex;
+        display: block;
       }
       .um-inner {
         text-align: center;
         max-width: 940px;
         width: 92vw;
+        margin: 28px auto 40px;
       }
       .um-title {
         font-family: var(--font-pixel);
@@ -986,14 +996,18 @@
 
       @media (max-width: 560px) {
         .hud-value {
-          font-size: 16px;
+          font-size: 15px;
         }
         .hud-block {
-          padding: 5px 9px;
-          min-width: 70px;
+          padding: 4px 7px;
+          min-width: 0;
+        }
+        .hud-label {
+          font-size: 7px;
+          letter-spacing: 1px;
         }
         #expbar-wrap {
-          width: 70vw;
+          width: 100%;
         }
         .up-card {
           width: 82vw;
@@ -1016,7 +1030,7 @@
         <div class="title-wrap">
           <div class="kicker">▮ a hugging survivors game ▮</div>
           <h1 class="game-title">
-            HOW MANY <span class="accent">HAVAS</span><br />CAN YOU HUG?
+            HOW MANY <span class="accent">NASSERS</span><br />CAN YOU HUG?
           </h1>
           <div class="subtitle">
             chase &middot; catch &middot; hug &middot; survive
@@ -1052,7 +1066,7 @@
         <div class="panel">
           <h2>How To Play</h2>
           <p>
-            Havas are scattered across the arena and they do <b>not</b> want
+            Nassers are scattered across the arena and they do <b>not</b> want
             to be hugged. Chase them down, get close, and hug them before time
             runs out.
           </p>
@@ -1064,18 +1078,18 @@
           </div>
           <h3>Arcade Mode</h3>
           <p>
-            You get 60 seconds. Hug as many Havas as possible. You
+            You get 60 seconds. Hug as many Nassers as possible. You
             automatically get stronger as you level up &mdash; no choices, just
             chaos.
           </p>
           <h3>Full Game Mode</h3>
           <p>
-            Instead of health, you have a countdown timer. Hugging Havas adds
+            Instead of health, you have a countdown timer. Hugging Nassers adds
             time back &mdash; but the bonus shrinks the longer you survive, so
             you'll always need the next hug. Level up to choose upgrades and
             unlock tools.
           </p>
-          <h3>Hava Types</h3>
+          <h3>Nasser Types</h3>
           <ul>
             <li><b>Normal</b> &mdash; balanced.</li>
             <li><b>Fast »</b> &mdash; hard to catch, worth more.</li>
@@ -1183,29 +1197,31 @@
 
       <!-- HUD -->
       <div id="hud">
-        <div class="hud-top">
-          <div style="display: flex; gap: 8px; flex-wrap: wrap">
-            <div class="hud-block">
-              <div class="hud-label" id="timer-label">TIME</div>
-              <div class="hud-value timer" id="hud-timer">60.0</div>
+        <div class="hud-topbar">
+          <div class="hud-top">
+            <div class="hud-stat-group">
+              <div class="hud-block">
+                <div class="hud-label" id="timer-label">TIME</div>
+                <div class="hud-value timer" id="hud-timer">60.0</div>
+              </div>
+              <div class="hud-block">
+                <div class="hud-label" id="secondary-label">HUGS</div>
+                <div class="hud-value" id="hud-secondary">0</div>
+              </div>
+              <div class="hud-block">
+                <div class="hud-label">COMBO</div>
+                <div class="hud-value combo" id="hud-combo">x1</div>
+              </div>
             </div>
-            <div class="hud-block">
-              <div class="hud-label" id="secondary-label">HUGS</div>
-              <div class="hud-value" id="hud-secondary">0</div>
-            </div>
-            <div class="hud-block">
-              <div class="hud-label">COMBO</div>
-              <div class="hud-value combo" id="hud-combo">x1</div>
+            <div class="hud-block" id="pause-hint" data-action="pause">
+              <div class="hud-label">LEVEL</div>
+              <div class="hud-value" id="hud-level">1</div>
             </div>
           </div>
-          <div class="hud-block" id="pause-hint" data-action="pause">
-            <div class="hud-label">LEVEL</div>
-            <div class="hud-value" id="hud-level">1</div>
+          <div id="expbar-wrap">
+            <div id="expbar-bg"><div id="expbar-fill"></div></div>
+            <div id="level-label">EXP</div>
           </div>
-        </div>
-        <div id="expbar-wrap">
-          <div id="expbar-bg"><div id="expbar-fill"></div></div>
-          <div id="level-label">EXP</div>
         </div>
         <div class="hud-bottom-left" id="tool-tray"></div>
       </div>
@@ -1287,14 +1303,14 @@
    ========================================================= */
         const ASSETS = {
           player: "assets/gohid.png",
-          hava: "assets/hava.png",
+          nasser: "assets/diser.png",
         };
 
         const Sprites = {
           player: null,
-          hava: null,
+          nasser: null,
           playerLoaded: false,
-          havaLoaded: false,
+          nasserLoaded: false,
         };
         function loadSprite(key, src) {
           const img = new Image();
@@ -1308,7 +1324,7 @@
           Sprites[key] = img;
         }
         loadSprite("player", ASSETS.player);
-        loadSprite("hava", ASSETS.hava);
+        loadSprite("nasser", ASSETS.nasser);
 
         /* =========================================================
    UTILITIES
@@ -1319,6 +1335,12 @@
         }
         function lerp(a, b, t) {
           return a + (b - a) * t;
+        }
+        /* Snaps a 0..1 progress value to a fixed number of discrete steps, so
+   animations feel like limited-frame pixel-art rather than smooth
+   CSS-style interpolation. e.g. quantize(0.42, 4) -> 0.25 (step 2 of 4). */
+        function quantize(t, steps) {
+          return Math.floor(clamp(t, 0, 0.9999) * steps) / steps;
         }
         function rand(min, max) {
           return min + Math.random() * (max - min);
@@ -1367,10 +1389,10 @@
           },
           arcade: { duration: 60 },
           full: {
-            startTime: 60,
-            maxTimeStart: 60,
+            startTime: 22,
+            maxTimeStart: 30,
             maxTimeFloor: 9,
-            maxTimeDecayPerSec: 0.025,
+            maxTimeDecayPerSec: 0.018,
             rewardTau: 130,
             rewardMinFactor: 0.01,
             baseTimeReward: 2.2,
@@ -1383,23 +1405,23 @@
           leveling: { baseExp: 12, growth: 1.16 },
           spawn: {
             initialCount: 9,
-            maxCount: 100,
+            maxCount: 46,
             baseInterval: 1.05,
             minInterval: 0.22,
             rampDuration: 220,
           },
-          havaBaseSpeed: 118,
-          havaBaseRadius: 20,
+          nasserBaseSpeed: 118,
+          nasserBaseRadius: 20,
         };
 
-        /* Hava types: visual identity is created entirely from ONE base PNG.
+        /* Nasser types: visual identity is created entirely from ONE base PNG.
    Color variants are produced by SpriteTint (see below), which recolors
    only the visible (alpha>0) pixels of the sprite and leaves transparent
    pixels fully transparent — no colored fringing, no filter hacks. */
-        const HAVA_TYPES = {
+        const NASSER_TYPES = {
           normal: {
             key: "normal",
-            label: "Hava",
+            label: "Nasser",
             speedMult: 1.0,
             sizeMult: 1.0,
             expMult: 1.0,
@@ -1420,7 +1442,7 @@
           },
           fast: {
             key: "fast",
-            label: "Fast Hava",
+            label: "Fast Nasser",
             speedMult: 1.75,
             sizeMult: 0.88,
             expMult: 1.35,
@@ -1441,7 +1463,7 @@
           },
           slow: {
             key: "slow",
-            label: "Slow Hava",
+            label: "Slow Nasser",
             speedMult: 0.55,
             sizeMult: 1.12,
             expMult: 0.7,
@@ -1462,7 +1484,7 @@
           },
           tiny: {
             key: "tiny",
-            label: "Tiny Hava",
+            label: "Tiny Nasser",
             speedMult: 1.25,
             sizeMult: 0.55,
             expMult: 1.25,
@@ -1483,7 +1505,7 @@
           },
           giant: {
             key: "giant",
-            label: "Giant Hava",
+            label: "Giant Nasser",
             speedMult: 0.42,
             sizeMult: 1.9,
             expMult: 1.9,
@@ -1504,7 +1526,7 @@
           },
           dangerous: {
             key: "dangerous",
-            label: "DANGEROUS Hava",
+            label: "DANGEROUS Nasser",
             speedMult: 0.55,
             sizeMult: 1.0,
             expMult: 0.0,
@@ -1525,7 +1547,7 @@
           },
           golden: {
             key: "golden",
-            label: "GOLDEN Hava",
+            label: "GOLDEN Nasser",
             speedMult: 2.1,
             sizeMult: 0.85,
             expMult: 4.2,
@@ -1637,7 +1659,7 @@
             name: "Black Hole",
             icon: "🕳️",
             maxLevel: 3,
-            desc: (l) => `Pulls nearby Havas toward you (str ${l})`,
+            desc: (l) => `Pulls nearby Nassers toward you (str ${l})`,
             apply: (p, l) => {
               p.blackHoleLevel = l;
             },
@@ -1657,7 +1679,7 @@
             name: "Four Leaf Clover",
             icon: "🍀",
             maxLevel: 4,
-            desc: (l) => `+${12 * l}% luck (rarer Havas appear more)`,
+            desc: (l) => `+${12 * l}% luck (rarer Nassers appear more)`,
             apply: (p, l) => {
               p.luckMult = 1 + 0.12 * l;
             },
@@ -1668,7 +1690,7 @@
             icon: "🫳",
             maxLevel: 4,
             desc: (l) =>
-              `Havas that get close to your hug range are slowed down (Lv${l})`,
+              `Nassers that get close to your hug range are slowed down (Lv${l})`,
             apply: (p, l) => {
               p.stickyArmsLevel = l;
             },
@@ -1723,7 +1745,7 @@
             icon: "👯",
             maxLevel: 3,
             desc: (l) =>
-              `${8 * l}% chance to catch a second nearby Hava in one hug`,
+              `${8 * l}% chance to catch a second nearby Nasser in one hug`,
             apply: (p, l) => {
               p.doubleHugChance = 0.08 * l;
             },
@@ -1795,7 +1817,7 @@
             name: "Thick Skin",
             icon: "🛡️",
             maxLevel: 4,
-            desc: (l) => `Dangerous Havas cost you ${20 * l}% less time`,
+            desc: (l) => `Dangerous Nassers cost you ${20 * l}% less time`,
             apply: (p, l) => {
               p.thickSkinMult = 1 - Math.min(0.8, 0.2 * l);
             },
@@ -1810,7 +1832,7 @@
             maxLevel: 5,
             baseCooldown: 3.2,
             desc: (l) =>
-              `Yanks ${1 + Math.floor(l / 2)} nearby Hava(s) to you.`,
+              `Yanks ${1 + Math.floor(l / 2)} nearby Nasser(s) to you.`,
             range: (l) => 320 + l * 50,
             targets: (l) => 1 + Math.floor(l / 2),
           },
@@ -1820,7 +1842,7 @@
             icon: "🍰",
             maxLevel: 5,
             baseCooldown: 5.5,
-            desc: (l) => `Drops a tasty cake that pulls nearby Havas in.`,
+            desc: (l) => `Drops a tasty cake that pulls nearby Nassers in.`,
             range: (l) => 170 + l * 35,
           },
           {
@@ -1829,7 +1851,7 @@
             icon: "🪢",
             maxLevel: 5,
             baseCooldown: 6.0,
-            desc: (l) => `Throws a snare that drags trapped Havas to you.`,
+            desc: (l) => `Throws a snare that drags trapped Nassers to you.`,
             range: (l) => 220 + l * 40,
           },
           {
@@ -1847,7 +1869,7 @@
             icon: "💎",
             maxLevel: 5,
             baseCooldown: 9.0,
-            desc: (l) => `Freezes every Hava around you briefly.`,
+            desc: (l) => `Freezes every Nasser around you briefly.`,
             range: (l) => 190 + l * 30,
           },
           {
@@ -1856,7 +1878,7 @@
             icon: "❄️",
             maxLevel: 5,
             baseCooldown: 4.5,
-            desc: (l) => `Lobs a slow zone at the nearest Hava crowd.`,
+            desc: (l) => `Lobs a slow zone at the nearest Nasser crowd.`,
             range: (l) => 260 + l * 40,
           },
           {
@@ -1865,7 +1887,7 @@
             icon: "🌀",
             maxLevel: 5,
             baseCooldown: 6.0,
-            desc: (l) => `Sucks up to ${3 + l * 2} Havas in a wide radius.`,
+            desc: (l) => `Sucks up to ${3 + l * 2} Nassers in a wide radius.`,
             range: (l) => 260 + l * 45,
           },
           {
@@ -1883,7 +1905,7 @@
             icon: "🪃",
             maxLevel: 5,
             baseCooldown: 5.0,
-            desc: (l) => `Flies out and yanks Havas back with it on return.`,
+            desc: (l) => `Flies out and yanks Nassers back with it on return.`,
             range: (l) => 300 + l * 40,
           },
           {
@@ -1892,7 +1914,7 @@
             icon: "🥅",
             maxLevel: 5,
             baseCooldown: 6.5,
-            desc: (l) => `Traps nearby Havas in place briefly.`,
+            desc: (l) => `Traps nearby Nassers in place briefly.`,
             range: (l) => 200 + l * 30,
           },
           {
@@ -1901,7 +1923,7 @@
             icon: "🍌",
             maxLevel: 5,
             baseCooldown: 5.5,
-            desc: (l) => `Havas slip on it and stumble toward you.`,
+            desc: (l) => `Nassers slip on it and stumble toward you.`,
             range: (l) => 230 + l * 35,
           },
           {
@@ -1910,7 +1932,7 @@
             icon: "🌟",
             maxLevel: 5,
             baseCooldown: 10.0,
-            desc: (l) => `Warps you straight to the nearest Hava crowd.`,
+            desc: (l) => `Warps you straight to the nearest Nasser crowd.`,
             range: (l) => 700 + l * 80,
           },
           {
@@ -1919,7 +1941,7 @@
             icon: "⏰",
             maxLevel: 5,
             baseCooldown: 8.0,
-            desc: (l) => `Startles and slows every Hava nearby.`,
+            desc: (l) => `Startles and slows every Nasser nearby.`,
             range: (l) => 320 + l * 45,
           },
 
@@ -1931,7 +1953,7 @@
             maxLevel: 5,
             kind: "aura",
             desc: (l) =>
-              `Constant aura slows Havas & gently pushes Dangerous ones away.`,
+              `Constant aura slows Nassers & gently pushes Dangerous ones away.`,
             range: (l) => 110 + l * 18,
           },
           {
@@ -1965,7 +1987,7 @@
             baseCooldown: 6.5,
             kind: "projectile",
             desc: (l) =>
-              `Lobbed at the Hava crowd; explodes into a pulling blast + lingering zone.`,
+              `Lobbed at the Nasser crowd; explodes into a pulling blast + lingering zone.`,
             range: (l) => 340 + l * 40,
             travel: 0.5,
           },
@@ -1976,7 +1998,7 @@
             maxLevel: 5,
             baseCooldown: 5.0,
             desc: (l) =>
-              `Zaps ${1 + Math.floor(l / 2)} random nearby Havas, yanking them to you instantly.`,
+              `Zaps ${1 + Math.floor(l / 2)} random nearby Nassers, yanking them to you instantly.`,
             range: (l) => 300 + l * 40,
             targets: (l) => 1 + Math.floor(l / 2),
           },
@@ -1988,7 +2010,7 @@
             baseCooldown: 4.2,
             kind: "missile",
             desc: (l) =>
-              `Homes in on the nearest Hava and reels it in on arrival.`,
+              `Homes in on the nearest Nasser and reels it in on arrival.`,
             range: (l) => 500 + l * 60,
             travel: 0.6,
           },
@@ -2012,7 +2034,7 @@
             baseCooldown: 9.0,
             kind: "zone",
             desc: (l) =>
-              `Leaves a lingering cloud that slows any Hava standing in it.`,
+              `Leaves a lingering cloud that slows any Nasser standing in it.`,
             range: (l) => 170 + l * 25,
             zoneDuration: (l) => 3 + l * 0.8,
           },
@@ -2108,7 +2130,7 @@
               { id: "snowball", minLevel: 3 },
               { id: "stickyarms", minLevel: 3 },
             ],
-            desc: "Hugging a frozen Hava gives +40% bonus reward.",
+            desc: "Hugging a frozen Nasser gives +40% bonus reward.",
           },
           {
             id: "bladeStorm",
@@ -2128,7 +2150,7 @@
               { id: "staticcling", minLevel: 3 },
               { id: "longarms", minLevel: 3 },
             ],
-            desc: "Static Cling zaps 2 extra Havas per cast.",
+            desc: "Static Cling zaps 2 extra Nassers per cast.",
           },
         ];
 
@@ -2281,15 +2303,15 @@
             spawnDangerMult: 1,
             chestLuckMult: 1,
             playerSpeedMult: 1,
-            havaSpeedMult: 1,
+            nasserSpeedMult: 1,
             unlock: null,
           },
           {
             id: "graveyard",
             name: "Haunted Graveyard",
-            desc: "Fog, tombstones, and Havas that don\u2019t scare easy.",
+            desc: "Fog, tombstones, and Nassers that don\u2019t scare easy.",
             difficulty: "Medium",
-            modifierText: "+35% Dangerous Hava frequency.",
+            modifierText: "+35% Dangerous Nasser frequency.",
             bg: "#0d0d14",
             accent: "#8a7bbf",
             decorPalette: ["#2b2b38", "#1f1f2c", "#3a3a4a"],
@@ -2298,7 +2320,7 @@
             spawnDangerMult: 1.35,
             chestLuckMult: 1,
             playerSpeedMult: 1,
-            havaSpeedMult: 1,
+            nasserSpeedMult: 1,
             unlock: { value: 25 },
           },
           {
@@ -2315,7 +2337,7 @@
             spawnDangerMult: 0.9,
             chestLuckMult: 1.5,
             playerSpeedMult: 1,
-            havaSpeedMult: 1,
+            nasserSpeedMult: 1,
             unlock: { value: 60 },
           },
           {
@@ -2323,7 +2345,7 @@
             name: "Burning Wasteland",
             desc: "Cracked earth and heat haze. Everything moves faster.",
             difficulty: "Hard",
-            modifierText: "+15% Hava speed, +20% rewards.",
+            modifierText: "+15% Nasser speed, +20% rewards.",
             bg: "#1c0f0a",
             accent: "#ff7a3d",
             decorPalette: ["#3d2416", "#4a2c1a", "#2a1810"],
@@ -2332,7 +2354,7 @@
             spawnDangerMult: 1.15,
             chestLuckMult: 1,
             playerSpeedMult: 1,
-            havaSpeedMult: 1.15,
+            nasserSpeedMult: 1.15,
             rewardMult: 1.2,
             unlock: { value: 120 },
           },
@@ -2341,7 +2363,7 @@
             name: "Frozen Ruins",
             desc: "Slippery ice and old broken statues. Slow and tense.",
             difficulty: "Hard",
-            modifierText: "-10% player & Hava speed, longer freezes.",
+            modifierText: "-10% player & Nasser speed, longer freezes.",
             bg: "#0d1620",
             accent: "#9adfff",
             decorPalette: ["#22374a", "#2c4258", "#1a2836"],
@@ -2350,7 +2372,7 @@
             spawnDangerMult: 1,
             chestLuckMult: 1.1,
             playerSpeedMult: 0.9,
-            havaSpeedMult: 0.9,
+            nasserSpeedMult: 0.9,
             unlock: { value: 200 },
           },
         ];
@@ -2359,10 +2381,10 @@
    SAVE SYSTEM
    ========================================================= */
         const SaveSystem = {
-          KEY_ARCADE: "havaHug_arcadeHighScore",
-          KEY_FULL: "havaHug_fullGameBestTime",
-          KEY_SETTINGS: "havaHug_settings",
-          KEY_LIFETIME: "havaHug_lifetimeHugs",
+          KEY_ARCADE: "nasserHug_arcadeHighScore",
+          KEY_FULL: "nasserHug_fullGameBestTime",
+          KEY_SETTINGS: "nasserHug_settings",
+          KEY_LIFETIME: "nasserHug_lifetimeHugs",
           // Arena-specific scores live under their own key so old saves keep working —
           // the default 'meadow' arena still reads/writes the original keys.
           arcadeKey(arenaId) {
@@ -2843,6 +2865,8 @@
             this.lungeT = 0;
             this.lungeVX = 0;
             this.lungeVY = 0;
+            this.hurtFlashT = 0;
+            this.trail = []; // afterimage points while turbo-boosted
           }
           get speed() {
             let s = CONFIG.player.baseSpeed * this.speedMult;
@@ -2909,9 +2933,42 @@
               CONFIG.arena.height - this.radius,
             );
             if (this.hugFlashT > 0) this.hugFlashT -= dt;
+            if (this.hurtFlashT > 0) this.hurtFlashT -= dt;
             this.animT += dt * (this.moving ? 9 : 2.4);
+            // pixel afterimage trail while turbo-boosted (dash effect)
+            if (this.turboBoostT > 0) {
+              this.trail.push({ x: this.x, y: this.y, t: 0 });
+              if (this.trail.length > 6) this.trail.shift();
+            } else if (this.trail.length) {
+              this.trail.shift();
+            }
+            for (const p of this.trail) p.t += dt;
           }
           draw(ctx, cam) {
+            // pixel afterimage trail (dash/turbo effect) — drawn as flat tinted silhouettes, fading in discrete steps
+            if (this.trail.length > 1 && Sprites.playerLoaded) {
+              for (let i = 0; i < this.trail.length - 1; i++) {
+                const p = this.trail[i];
+                const frac = i / (this.trail.length - 1);
+                const tsx = p.x - cam.x,
+                  tsy = p.y - cam.y;
+                const size = this.radius * 2.8;
+                ctx.save();
+                ctx.translate(tsx, tsy);
+                ctx.globalAlpha = quantize(frac, 4) * 0.35;
+                ctx.imageSmoothingEnabled = false;
+                ctx.drawImage(
+                  SpriteTint.getTinted("player", "#a970ff", 0.5) ||
+                    Sprites.player,
+                  -size / 2,
+                  -size / 2,
+                  size,
+                  size,
+                );
+                ctx.restore();
+              }
+              ctx.globalAlpha = 1;
+            }
             const sx = this.x - cam.x,
               sy = this.y - cam.y;
             ctx.save();
@@ -2929,16 +2986,23 @@
             );
             ctx.fillStyle = "rgba(0,0,0,.4)";
             ctx.fill();
+            // quantize the walk bob into discrete pixel-art "steps" instead of a smooth sine wave
+            const walkStep = this.moving
+              ? quantize((this.animT % TAU) / TAU, 6)
+              : quantize(((this.animT * 0.4) % TAU) / TAU, 4);
             const bob = this.moving
-              ? Math.sin(this.animT) * 2.5
-              : Math.sin(this.animT * 0.6) * 1;
+              ? Math.sin(walkStep * TAU) * 2.5
+              : Math.sin(walkStep * TAU) * 1;
             ctx.translate(0, bob);
             const tilt = clamp(this.vx / CONFIG.player.baseSpeed, -1, 1) * 0.14;
             const squashPulse = this.moving
-              ? Math.abs(Math.sin(this.animT)) * 0.05
+              ? Math.abs(Math.sin(walkStep * TAU)) * 0.05
               : 0;
             const squashY = (this.hugFlashT > 0 ? 1.16 : 1) + squashPulse;
             const squashX = (this.hugFlashT > 0 ? 0.86 : 1) - squashPulse;
+            // hurt flash: blink between normal and a solid red silhouette on a coarse duty cycle (classic i-frame flicker)
+            const hurtBlink =
+              this.hurtFlashT > 0 && Math.floor(this.hurtFlashT * 14) % 2 === 0;
 
             if (Sprites.playerLoaded) {
               ctx.save();
@@ -2950,7 +3014,11 @@
               }
               const size = this.radius * 2.8;
               ctx.imageSmoothingEnabled = false;
-              ctx.drawImage(Sprites.player, -size / 2, -size / 2, size, size);
+              const sprite = hurtBlink
+                ? SpriteTint.getTinted("player", "#ff3b3b", 0.85) ||
+                  Sprites.player
+                : Sprites.player;
+              ctx.drawImage(sprite, -size / 2, -size / 2, size, size);
               ctx.restore();
             } else {
               // ---- procedural fallback (used if player.png fails to load) ----
@@ -3023,23 +3091,23 @@
         }
 
         /* =========================================================
-   HAVA
+   NASSER
    ========================================================= */
-        let HAVA_UID = 1;
-        class Hava {
+        let NASSER_UID = 1;
+        class Nasser {
           constructor(type, x, y, difficulty) {
-            this.id = HAVA_UID++;
+            this.id = NASSER_UID++;
             this.type = type;
             this.x = x;
             this.y = y;
             this.vx = 0;
             this.vy = 0;
-            this.radius = CONFIG.havaBaseRadius * type.sizeMult;
+            this.radius = CONFIG.nasserBaseRadius * type.sizeMult;
             this.baseSpeed =
-              CONFIG.havaBaseSpeed *
+              CONFIG.nasserBaseSpeed *
               type.speedMult *
               (1 + difficulty * 0.35) *
-              (Game.arena ? Game.arena.havaSpeedMult : 1);
+              (Game.arena ? Game.arena.nasserSpeedMult : 1);
             this.wanderAngle = Math.random() * TAU;
             this.animT = Math.random() * 10;
             this.frozenT = 0;
@@ -3189,7 +3257,7 @@
             ctx.fillStyle = "rgba(0,0,0,.32)";
             ctx.fill();
 
-            if (Sprites.havaLoaded) {
+            if (Sprites.nasserLoaded) {
               ctx.save();
               const size = this.radius * 2.9;
               ctx.imageSmoothingEnabled = false;
@@ -3204,14 +3272,14 @@
               // (and partially-transparent edge pixels) are left exactly as they were.
               const tinted =
                 this.frozenT > 0
-                  ? SpriteTint.getTinted("hava", "#9adfff", 0.55)
+                  ? SpriteTint.getTinted("nasser", "#9adfff", 0.55)
                   : SpriteTint.getTinted(
-                      "hava",
+                      "nasser",
                       this.type.tintColor,
                       this.type.tintStrength,
                     );
               ctx.drawImage(
-                tinted || Sprites.hava,
+                tinted || Sprites.nasser,
                 -size / 2,
                 -size / 2,
                 size,
@@ -3220,7 +3288,7 @@
               ctx.shadowBlur = 0;
               ctx.restore();
             } else {
-              // ---- procedural fallback (used if hava.png fails to load) ----
+              // ---- procedural fallback (used if nasser.png fails to load) ----
               if (this.type.glow) {
                 ctx.shadowColor = "#ffd76a";
                 ctx.shadowBlur = 22;
@@ -3336,9 +3404,9 @@
         }
 
         /* =========================================================
-   HAVA MANAGER
+   NASSER MANAGER
    ========================================================= */
-        class HavaManager {
+        class NasserManager {
           constructor() {
             this.list = [];
             this.spawnTimer = 0;
@@ -3352,8 +3420,8 @@
           }
           pickType(diff, luck) {
             const pool = [];
-            for (const key in HAVA_TYPES) {
-              const t = HAVA_TYPES[key];
+            for (const key in NASSER_TYPES) {
+              const t = NASSER_TYPES[key];
               if (diff < t.minDiff) continue;
               let w = t.weightBase;
               if (t.key === "golden") w *= luck;
@@ -3385,7 +3453,7 @@
               );
               tries++;
             } while (dist(x, y, player.x, player.y) < 300 && tries < 8);
-            const n = new Hava(type, x, y, diff);
+            const n = new Nasser(type, x, y, diff);
             this.list.push(n);
             if (type.key === "golden") Game.onGoldenEvent();
             return n;
@@ -3553,21 +3621,21 @@
               this.active[def.id] = { def, level: 0, cd: 0 };
             this.active[def.id].level = level;
           }
-          update(dt, player, havaManager) {
+          update(dt, player, nasserManager) {
             for (const id in this.active) {
               const t = this.active[id];
               if (t.def.kind === "aura") {
-                this.tickAura(t, dt, player, havaManager);
+                this.tickAura(t, dt, player, nasserManager);
                 continue;
               }
               if (t.def.kind === "orbit") {
-                this.tickOrbit(t, dt, player, havaManager);
+                this.tickOrbit(t, dt, player, nasserManager);
                 continue;
               }
               if (!t.def.baseCooldown) continue;
               t.cd -= dt;
               if (t.cd <= 0) {
-                this.fire(t, player, havaManager);
+                this.fire(t, player, nasserManager);
                 t.cd =
                   t.def.baseCooldown * player.cooldownMult * rand(0.96, 1.04);
               }
@@ -3581,7 +3649,7 @@
                 if (!n.type.danger) {
                   n.slowT = Math.max(n.slowT, 0.2);
                 } else {
-                  // gently push dangerous havas back out of the aura
+                  // gently push dangerous nassers back out of the aura
                   const a = Math.atan2(n.y - player.y, n.x - player.x);
                   n.x += Math.cos(a) * 40 * dt;
                   n.y += Math.sin(a) * 40 * dt;
@@ -3639,6 +3707,10 @@
             const buddyCount =
               count + (Game.evolvedSet && Game.evolvedSet.bladeStorm ? 2 : 0);
             t.positions = [];
+            if (!t.hitPulse) t.hitPulse = [];
+            for (let i = 0; i < t.hitPulse.length; i++) {
+              if (t.hitPulse[i] > 0) t.hitPulse[i] -= dt;
+            }
             for (let i = 0; i < buddyCount; i++) {
               const ang = t.spin + (TAU / buddyCount) * i;
               const bx = player.x + Math.cos(ang) * radius,
@@ -3649,7 +3721,10 @@
                 by,
                 (n) => !n.type.danger && dist(bx, by, n.x, n.y) < n.radius + 12,
               );
-              if (hit) Game.onHug(hit, true);
+              if (hit) {
+                Game.onHug(hit, true);
+                t.hitPulse[i] = 0.22;
+              }
             }
           }
           fire(t, player, nm) {
@@ -4267,9 +4342,8 @@
           }
           draw(ctx, cam) {
             for (const c of this.chests) {
-              if (c.opened) continue;
               const sx = c.x - cam.x,
-                sy = c.y - cam.y + Math.sin(c.bob) * 4;
+                sy = c.y - cam.y + (c.opened ? 0 : Math.sin(c.bob) * 4);
               if (sx < -60 || sx > cam.w + 60 || sy < -60 || sy > cam.h + 60)
                 continue;
               const def = CHEST_KINDS[c.kind];
@@ -4279,20 +4353,46 @@
                 ctx.shadowColor = def.rainbow
                   ? `hsl(${(performance.now() / 6) % 360},90%,65%)`
                   : def.glow;
-                ctx.shadowBlur = 18;
+                ctx.shadowBlur = c.opened ? 30 : 18;
               }
-              ctx.fillStyle = def.rainbow
-                ? `hsl(${(performance.now() / 6) % 360},80%,55%)`
-                : def.color;
-              ctx.fillRect(-16, -6, 32, 20);
-              ctx.fillStyle = def.lid;
-              ctx.fillRect(-16, -6, 32, 7);
-              ctx.strokeStyle = "rgba(0,0,0,.4)";
-              ctx.lineWidth = 2;
-              ctx.strokeRect(-16, -6, 32, 20);
-              ctx.beginPath();
-              ctx.arc(0, -6, 4, 0, Math.PI, true);
-              ctx.stroke();
+              if (c.opened) {
+                // opening sequence: base box stays put, lid pops up + rotates open,
+                // a pixel light-beam flashes out in quantized steps, then it's gone.
+                const openFrac = quantize(Math.min(1, c.openT / 0.35), 4);
+                ctx.globalAlpha = Math.max(0, 1 - c.openT / 0.6);
+                ctx.fillStyle = def.rainbow
+                  ? `hsl(${(performance.now() / 6) % 360},80%,55%)`
+                  : def.color;
+                ctx.fillRect(-16, -6, 32, 20);
+                // light beam
+                ctx.fillStyle =
+                  "rgba(255,255,255," + 0.5 * (1 - openFrac) + ")";
+                ctx.fillRect(-10, -30, 20, 26);
+                // lid, lifted and rotated back on a hinge
+                ctx.save();
+                ctx.translate(-14, -6);
+                ctx.rotate(-openFrac * 1.9);
+                ctx.fillStyle = def.lid;
+                ctx.fillRect(0, -7, 32, 7);
+                ctx.restore();
+                ctx.strokeStyle = "rgba(0,0,0,.4)";
+                ctx.lineWidth = 2;
+                ctx.strokeRect(-16, -6, 32, 20);
+                ctx.globalAlpha = 1;
+              } else {
+                ctx.fillStyle = def.rainbow
+                  ? `hsl(${(performance.now() / 6) % 360},80%,55%)`
+                  : def.color;
+                ctx.fillRect(-16, -6, 32, 20);
+                ctx.fillStyle = def.lid;
+                ctx.fillRect(-16, -6, 32, 7);
+                ctx.strokeStyle = "rgba(0,0,0,.4)";
+                ctx.lineWidth = 2;
+                ctx.strokeRect(-16, -6, 32, 20);
+                ctx.beginPath();
+                ctx.arc(0, -6, 4, 0, Math.PI, true);
+                ctx.stroke();
+              }
               ctx.restore();
             }
           }
@@ -4612,13 +4712,13 @@
               mode === "arcade" ? "Time\u2019s Up!" : "Game Over";
             const rows = [];
             if (mode === "arcade") {
-              rows.push(["Havas Hugged", stats.hugs]);
+              rows.push(["Nassers Hugged", stats.hugs]);
               rows.push(["Highest Combo", "x" + stats.maxCombo]);
               rows.push(["Level Reached", stats.level]);
               rows.push(["Best Score", SaveSystem.getArcadeBest()]);
             } else {
               rows.push(["Survived", fmtTime(stats.survived) + "s"]);
-              rows.push(["Havas Hugged", stats.hugs]);
+              rows.push(["Nassers Hugged", stats.hugs]);
               rows.push(["Highest Combo", "x" + stats.maxCombo]);
               rows.push(["Level Reached", stats.level]);
               rows.push(["Best Time", fmtTime(SaveSystem.getFullBest()) + "s"]);
@@ -4641,7 +4741,7 @@
           ctx: null,
           camera: null,
           player: null,
-          havas: null,
+          nassers: null,
           particles: null,
           exp: null,
           upgrades: null,
@@ -4668,6 +4768,9 @@
           lightningBolts: [],
           tempEffects: [],
           evolvedSet: {},
+          deathFx: [],
+          shockwaves: [],
+          freezeT: 0,
           levelUpQueue: [],
           selectedArenaId: "meadow",
           arena: null,
@@ -4922,7 +5025,7 @@
           startGame(mode) {
             this.mode = mode;
             this.player = new Player();
-            this.havas = new HavaManager();
+            this.nassers = new NasserManager();
             this.particles = new ParticleSystem();
             this.exp = new ExperienceSystem();
             this.upgrades = new UpgradeSystem();
@@ -4940,6 +5043,9 @@
             this.lightningBolts = [];
             this.tempEffects = [];
             this.evolvedSet = {};
+            this.deathFx = [];
+            this.shockwaves = [];
+            this.freezeT = 0;
             this.levelUpQueue = [];
             this.elapsed = 0;
             this.hugs = 0;
@@ -4988,7 +5094,7 @@
 
           onGoldenEvent() {
             AudioSystem.golden();
-            UI.toast("\u2728 GOLDEN HAVA! GET HIM! \u2728", 2200);
+            UI.toast("\u2728 GOLDEN NASSER! GET HIM! \u2728", 2200);
           },
 
           checkMilestones() {
@@ -5002,10 +5108,10 @@
             }
           },
 
-          onHug(hava, isChainHug) {
-            const type = hava.type;
-            hava.alive = false;
-            this.player.triggerHug(hava.x, hava.y);
+          onHug(nasser, isChainHug) {
+            const type = nasser.type;
+            nasser.alive = false;
+            this.player.triggerHug(nasser.x, nasser.y);
             AudioSystem.hug(this.combo);
             if (type.glow) AudioSystem.golden();
             if (type.danger) AudioSystem.danger();
@@ -5027,6 +5133,13 @@
               CONFIG.combo.maxBonus,
               (this.combo - 1) * CONFIG.combo.bonusPerLevel,
             );
+            const isMega =
+              !type.danger &&
+              !isChainHug &&
+              this.player.megaHugChance > 0 &&
+              Math.random() < this.player.megaHugChance;
+            const rewardMult =
+              (this.player.warmHugsMult || 1) * (isMega ? 2 : 1);
 
             const pcolor = type.danger
               ? "#ff5c72"
@@ -5034,23 +5147,68 @@
                 ? "#ffd76a"
                 : type.color;
             this.particles.burst(
-              hava.x,
-              hava.y,
+              nasser.x,
+              nasser.y,
               pcolor,
               type.glow ? 36 : 16,
               { maxSpeed: type.glow ? 260 : 170, minLife: 0.35, maxLife: 0.75 },
             );
-            this.camera.shake(type.glow ? 10 : type.danger ? 7 : 4, 0.18);
 
-            // Bear Hug: small AoE stun ripple on nearby Havas when you hug one
+            // pixel death-pop: a short, stepped (non-smooth) scale+fade of the actual
+            // sprite, tinted to the type's color — this is the "sprite dies" animation
+            this.deathFx.push({
+              x: nasser.x,
+              y: nasser.y,
+              radius: nasser.radius,
+              tintColor: type.tintColor,
+              tintStrength: type.tintStrength,
+              danger: type.danger,
+              t: 0,
+              duration: type.glow ? 0.36 : 0.24,
+            });
+
+            if (type.danger) {
+              this.player.hurtFlashT = 0.4;
+              this.camera.shake(8, 0.2);
+            } else if (isMega) {
+              this.camera.shake(9, 0.2);
+              this.freezeT = 0.06;
+              this.shockwaves.push({
+                x: nasser.x,
+                y: nasser.y,
+                color: "#ffd166",
+                t: 0,
+                duration: 0.32,
+                maxR: 70,
+              });
+              UI.comboBanner("MEGA HUG!");
+              this.particles.burst(nasser.x, nasser.y, "#ffd166", 24, {
+                maxSpeed: 220,
+                minLife: 0.3,
+                maxLife: 0.6,
+              });
+            } else {
+              this.camera.shake(type.glow ? 10 : 4, 0.18);
+            }
+            if (type.glow)
+              this.shockwaves.push({
+                x: nasser.x,
+                y: nasser.y,
+                color: "#ffd76a",
+                t: 0,
+                duration: 0.4,
+                maxR: 90,
+              });
+
+            // Bear Hug: small AoE stun ripple on nearby Nassers when you hug one
             if (this.player.bearHugLevel > 0) {
-              const splash = this.havas.inRadius(
-                hava.x,
-                hava.y,
+              const splash = this.nassers.inRadius(
+                nasser.x,
+                nasser.y,
                 60 + this.player.bearHugLevel * 14,
               );
               for (const s of splash) {
-                if (s !== hava && !s.type.danger)
+                if (s !== nasser && !s.type.danger)
                   s.slowT = Math.max(s.slowT, 0.5);
               }
             }
@@ -5059,18 +5217,22 @@
 
             if (this.mode === "arcade") {
               const expGain =
-                6 * type.expMult * (1 + comboBonus) * this.player.totalExpMult;
+                6 *
+                type.expMult *
+                (1 + comboBonus) *
+                this.player.totalExpMult *
+                rewardMult;
               this.particles.text(
-                hava.x,
-                hava.y - 26,
-                type.danger ? "OUCH!" : "HUG!",
-                type.danger ? "#ff5c72" : "#fff",
-                18,
+                nasser.x,
+                nasser.y - 26,
+                type.danger ? "OUCH!" : isMega ? "MEGA HUG!" : "HUG!",
+                type.danger ? "#ff5c72" : isMega ? "#ffd166" : "#fff",
+                isMega ? 22 : 18,
               );
               if (!type.danger) {
                 this.particles.text(
-                  hava.x,
-                  hava.y - 8,
+                  nasser.x,
+                  nasser.y - 8,
                   "+" + Math.round(expGain) + " EXP",
                   "#a970ff",
                   13,
@@ -5081,26 +5243,31 @@
             } else {
               let timeDelta;
               if (type.danger) {
-                timeDelta = -3.2;
+                timeDelta =
+                  -3.2 *
+                  (this.player.thickSkinMult !== undefined
+                    ? this.player.thickSkinMult
+                    : 1);
               } else {
                 const factor = this.timeRewardFactor();
                 timeDelta =
                   CONFIG.full.baseTimeReward *
                   type.rewardMult *
                   factor *
-                  (1 + comboBonus);
+                  (1 + comboBonus) *
+                  rewardMult;
               }
               this.timer = clamp(this.timer + timeDelta, 0, this.maxStoredTime);
               this.particles.text(
-                hava.x,
-                hava.y - 26,
-                type.danger ? "OUCH!" : "HUG!",
-                type.danger ? "#ff5c72" : "#fff",
-                18,
+                nasser.x,
+                nasser.y - 26,
+                type.danger ? "OUCH!" : isMega ? "MEGA HUG!" : "HUG!",
+                type.danger ? "#ff5c72" : isMega ? "#ffd166" : "#fff",
+                isMega ? 22 : 18,
               );
               this.particles.text(
-                hava.x,
-                hava.y - 8,
+                nasser.x,
+                nasser.y - 8,
                 (timeDelta >= 0 ? "+" : "") + timeDelta.toFixed(2) + "s",
                 timeDelta >= 0 ? "#6fe3a3" : "#ff5c72",
                 13,
@@ -5110,7 +5277,8 @@
                   6 *
                   type.expMult *
                   (1 + comboBonus) *
-                  this.player.totalExpMult;
+                  this.player.totalExpMult *
+                  rewardMult;
                 const lv = this.exp.add(expGain);
                 if (lv.length) this.queueLevelUps(lv.length);
               }
@@ -5118,21 +5286,21 @@
 
             if (!type.danger) this.checkMilestones();
 
-            // Double Hug: chance to also catch a second nearby Hava
+            // Double Hug: chance to also catch a second nearby Nasser
             if (
               !isChainHug &&
               !type.danger &&
               this.player.doubleHugChance > 0 &&
               Math.random() < this.player.doubleHugChance
             ) {
-              const second = this.havas.nearest(
-                hava.x,
-                hava.y,
+              const second = this.nassers.nearest(
+                nasser.x,
+                nasser.y,
                 (n) =>
-                  n !== hava &&
+                  n !== nasser &&
                   n.alive &&
                   !n.type.danger &&
-                  dist(hava.x, hava.y, n.x, n.y) <
+                  dist(nasser.x, nasser.y, n.x, n.y) <
                     this.player.hugRadius * 2.2,
               );
               if (second) {
@@ -5170,6 +5338,19 @@
             this.levelUpQueue.shift();
             this.state = "levelup";
             AudioSystem.levelup();
+            this.shockwaves.push({
+              x: this.player.x,
+              y: this.player.y,
+              color: "#a970ff",
+              t: 0,
+              duration: 0.35,
+              maxR: 80,
+            });
+            this.particles.burst(this.player.x, this.player.y, "#ffd76a", 22, {
+              maxSpeed: 200,
+              minLife: 0.35,
+              maxLife: 0.65,
+            });
             const choices = this.upgrades.rollChoices(3, true);
             if (choices.length === 0) {
               this.state = "playing";
@@ -5379,7 +5560,7 @@
 
           checkHugs() {
             const hr = this.player.hugRadius;
-            for (const n of this.havas.list) {
+            for (const n of this.nassers.list) {
               if (!n.alive) continue;
               const rr = hr + n.radius * 0.6;
               if (dist2(this.player.x, this.player.y, n.x, n.y) <= rr * rr) {
@@ -5391,7 +5572,7 @@
           applyStickyArms(dt) {
             if (this.player.stickyArmsLevel <= 0) return;
             const range = this.player.hugRadius * 1.5;
-            for (const n of this.havas.list) {
+            for (const n of this.nassers.list) {
               if (!n.alive || n.type.danger) continue;
               if (
                 dist2(this.player.x, this.player.y, n.x, n.y) <
@@ -5441,11 +5622,25 @@
                 continue;
               }
               if (z.slow) {
-                const targets = this.havas.inRadius(z.x, z.y, z.r);
+                const targets = this.nassers.inRadius(z.x, z.y, z.r);
                 for (const n of targets) {
                   n.slowT = Math.max(n.slowT, 0.25);
                 }
               }
+            }
+          },
+          updateDeathFx(dt) {
+            for (let i = this.deathFx.length - 1; i >= 0; i--) {
+              const fx = this.deathFx[i];
+              fx.t += dt;
+              if (fx.t >= fx.duration) this.deathFx.splice(i, 1);
+            }
+          },
+          updateShockwaves(dt) {
+            for (let i = this.shockwaves.length - 1; i >= 0; i--) {
+              const s = this.shockwaves[i];
+              s.t += dt;
+              if (s.t >= s.duration) this.shockwaves.splice(i, 1);
             }
           },
           updateTempEffects(dt) {
@@ -5480,6 +5675,30 @@
                   18,
                 );
                 this.camera.shake(9, 0.3);
+                this.freezeT = 0.14;
+                this.shockwaves.push({
+                  x: this.player.x,
+                  y: this.player.y,
+                  color: "#ffd76a",
+                  t: 0,
+                  duration: 0.5,
+                  maxR: 130,
+                });
+                this.shockwaves.push({
+                  x: this.player.x,
+                  y: this.player.y,
+                  color: "#a970ff",
+                  t: 0,
+                  duration: 0.62,
+                  maxR: 100,
+                });
+                this.particles.burst(
+                  this.player.x,
+                  this.player.y,
+                  "#ffd76a",
+                  40,
+                  { maxSpeed: 260, minLife: 0.4, maxLife: 0.8 },
+                );
               }
             }
           },
@@ -5527,6 +5746,17 @@
             if (this.state !== "playing") {
               return;
             }
+
+            // Brief freeze-frame ("hitstop") for big moments — gameplay pauses for an
+            // instant while fx/particles keep animating, then resumes automatically.
+            if (this.freezeT > 0) {
+              this.freezeT -= dt;
+              this.particles.update(dt);
+              this.updateDeathFx(dt);
+              this.updateShockwaves(dt);
+              return;
+            }
+
             this.elapsed += dt;
 
             if (this.mode === "arcade") {
@@ -5554,14 +5784,14 @@
 
             this.player.update(dt, this.input);
             this.camera.follow(this.player.x, this.player.y, dt);
-            this.havas.update(
+            this.nassers.update(
               dt,
               this.elapsed,
               this.player,
               this.player.blackHoleLevel,
             );
             if (this.mode === "full")
-              this.tools.update(dt, this.player, this.havas);
+              this.tools.update(dt, this.player, this.nassers);
             this.chests.update(
               dt,
               this.elapsed,
@@ -5608,6 +5838,8 @@
               lb.t += dt;
               if (lb.t >= lb.dur) this.lightningBolts.splice(i, 1);
             }
+            this.updateDeathFx(dt);
+            this.updateShockwaves(dt);
 
             UI.updateHud({
               timer: this.timer,
@@ -5673,26 +5905,33 @@
               ctx.stroke();
               ctx.globalAlpha = 1;
             }
-            // telegraphs (tool area-of-effect rings)
+            // telegraphs (tool area-of-effect rings) — expands in discrete pixel steps
             for (const tg of this.telegraphs) {
               const sx = tg.x - cam.x,
                 sy = tg.y - cam.y;
               const a = tg.t / tg.maxT;
-              ctx.globalAlpha = a * 0.5;
+              const stepFrac = quantize(1 - a, 5);
+              ctx.globalAlpha = a * 0.55;
               ctx.strokeStyle = tg.color;
               ctx.lineWidth = 3;
+              ctx.setLineDash([5, 3]);
               ctx.beginPath();
-              ctx.arc(sx, sy, tg.r * (1.15 - a * 0.15), 0, TAU);
+              ctx.arc(sx, sy, tg.r * (0.7 + 0.3 * stepFrac), 0, TAU);
               ctx.stroke();
+              ctx.setLineDash([]);
               ctx.globalAlpha = 1;
             }
-            // rope lines (grappling hook / rope visuals)
+            // rope lines (grappling hook / rope visuals) — extends toward the target
+            // in quantized steps, then holds and fades, instead of snapping full-length.
             for (const rl of this.ropeLines) {
+              const growFrac = quantize(Math.min(1, rl.t / (rl.dur * 0.45)), 5);
               const a = 1 - rl.t / rl.dur;
+              const ex = lerp(rl.x1, rl.x2, growFrac),
+                ey = lerp(rl.y1, rl.y2, growFrac);
               const x1 = rl.x1 - cam.x,
                 y1 = rl.y1 - cam.y,
-                x2 = rl.x2 - cam.x,
-                y2 = rl.y2 - cam.y;
+                x2 = ex - cam.x,
+                y2 = ey - cam.y;
               ctx.globalAlpha = a;
               ctx.strokeStyle = rl.color;
               ctx.lineWidth = 3;
@@ -5702,18 +5941,35 @@
               ctx.lineTo(x2, y2);
               ctx.stroke();
               ctx.setLineDash([]);
+              // hook tip while still extending
+              if (growFrac < 1) {
+                ctx.fillStyle = rl.color;
+                ctx.save();
+                ctx.translate(x2, y2);
+                ctx.rotate(rl.t * 18);
+                ctx.fillRect(-3, -3, 6, 6);
+                ctx.restore();
+              } else if (!rl.impactFired) {
+                rl.impactFired = true;
+                Game.particles.burst(rl.x2, rl.y2, rl.color, 8, {
+                  maxSpeed: 110,
+                  minLife: 0.2,
+                  maxLife: 0.35,
+                });
+              }
               ctx.globalAlpha = 1;
             }
-            // lightning bolts (static cling)
+            // lightning bolts (static cling) — a bright over-saturated flash frame first, then fades
             for (const lb of this.lightningBolts) {
-              const a = 1 - lb.t / lb.dur;
+              const frac = lb.t / lb.dur;
+              const a = 1 - frac;
               const x1 = lb.x1 - cam.x,
                 y1 = lb.y1 - cam.y,
                 x2 = lb.x2 - cam.x,
                 y2 = lb.y2 - cam.y;
               ctx.globalAlpha = a;
-              ctx.strokeStyle = "#fff2a3";
-              ctx.lineWidth = 2.5;
+              ctx.strokeStyle = frac < 0.35 ? "#ffffff" : "#fff2a3";
+              ctx.lineWidth = frac < 0.35 ? 4 : 2.5;
               ctx.beginPath();
               ctx.moveTo(x1, y1);
               const steps = 4;
@@ -5766,7 +6022,7 @@
                 ctx.stroke();
                 ctx.restore();
               } else if (p.kind === "missile") {
-                const target = this.havas.list.find(
+                const target = this.nassers.list.find(
                   (n) => n.id === p.targetId && n.alive,
                 );
                 const tx = target ? target.x : p.x,
@@ -5788,20 +6044,100 @@
             }
 
             if (this.chests) this.chests.draw(ctx, cam);
-            if (this.havas) this.havas.draw(ctx, cam);
+            if (this.nassers) this.nassers.draw(ctx, cam);
+
+            // pixel death-pop: 3 discrete stepped frames of the tinted sprite scaling+fading out
+            for (const fx of this.deathFx) {
+              const frac = fx.t / fx.duration;
+              const frames = [
+                { scale: 1.0, alpha: 1.0 },
+                { scale: 1.35, alpha: 0.6 },
+                { scale: 1.7, alpha: 0.22 },
+              ];
+              const idx = Math.min(2, Math.floor(frac * 3));
+              const fr = frames[idx];
+              const sx = fx.x - cam.x,
+                sy = fx.y - cam.y;
+              ctx.save();
+              ctx.translate(sx, sy);
+              ctx.globalAlpha = fr.alpha;
+              if (Sprites.nasserLoaded) {
+                const size = fx.radius * 2.9 * fr.scale;
+                ctx.imageSmoothingEnabled = false;
+                const sprite = fx.danger
+                  ? SpriteTint.getTinted("nasser", "#ff2d4d", 0.85)
+                  : SpriteTint.getTinted(
+                      "nasser",
+                      fx.tintColor,
+                      fx.tintStrength,
+                    );
+                ctx.drawImage(
+                  sprite || Sprites.nasser,
+                  -size / 2,
+                  -size / 2,
+                  size,
+                  size,
+                );
+              } else {
+                ctx.fillStyle = fx.danger ? "#ff5c72" : "#cdd6f4";
+                ctx.beginPath();
+                ctx.arc(0, 0, fx.radius * fr.scale, 0, TAU);
+                ctx.fill();
+              }
+              ctx.restore();
+              ctx.globalAlpha = 1;
+            }
+
+            // blocky pixel shockwave rings (mega hug / golden hug) — quantized steps, not a smooth circle
+            for (const s of this.shockwaves) {
+              const frac = quantize(s.t / s.duration, 5);
+              const r = 8 + frac * s.maxR;
+              const a = 1 - s.t / s.duration;
+              const sx = s.x - cam.x,
+                sy = s.y - cam.y;
+              ctx.save();
+              ctx.translate(sx, sy);
+              ctx.globalAlpha = Math.max(0, a);
+              ctx.strokeStyle = s.color;
+              ctx.lineWidth = 3;
+              const sides = 8,
+                pts = [];
+              for (let i = 0; i < sides; i++) {
+                const ang = (TAU / sides) * i;
+                pts.push([
+                  Math.round(Math.cos(ang) * r),
+                  Math.round(Math.sin(ang) * r),
+                ]);
+              }
+              ctx.beginPath();
+              ctx.moveTo(pts[0][0], pts[0][1]);
+              for (let i = 1; i < pts.length; i++)
+                ctx.lineTo(pts[i][0], pts[i][1]);
+              ctx.closePath();
+              ctx.stroke();
+              ctx.restore();
+              ctx.globalAlpha = 1;
+            }
+
             if (this.player) this.player.draw(ctx, cam);
             if (this.tools) {
               for (const id in this.tools.active) {
                 const t = this.tools.active[id];
                 if (t.def.kind === "orbit" && t.positions) {
-                  for (const pos of t.positions) {
+                  t.positions.forEach((pos, idx) => {
+                    const bobPhase = performance.now() / 260 + idx * 1.9;
+                    const bob =
+                      quantize((Math.sin(bobPhase) + 1) / 2, 4) * 5 - 2.5;
+                    const pulse = t.hitPulse && t.hitPulse[idx] > 0 ? 1.5 : 1;
                     const sx = pos.x - cam.x,
-                      sy = pos.y - cam.y;
+                      sy = pos.y - cam.y + bob;
                     ctx.save();
                     ctx.translate(sx, sy);
+                    ctx.rotate(Math.sin(bobPhase * 0.7) * 0.25);
+                    ctx.scale(pulse, pulse);
                     ctx.fillStyle = "#ffd76a";
                     ctx.shadowColor = "#ffd76a";
-                    ctx.shadowBlur = 8;
+                    ctx.shadowBlur = pulse > 1 ? 14 : 8;
                     ctx.beginPath();
                     ctx.arc(0, 0, 8, 0, TAU);
                     ctx.fill();
@@ -5810,7 +6146,7 @@
                     ctx.textAlign = "center";
                     ctx.fillText("\uD83E\uDDF8", 0, 4);
                     ctx.restore();
-                  }
+                  });
                 }
               }
             }
