@@ -495,7 +495,7 @@
         image-rendering: pixelated;
         background-image: url("assets/icons.png");
         background-repeat: no-repeat;
-        background-size: 384px 240px; /* 8 cols x 5 rows @ 48px */
+        background-size: 384px 336px; /* 8 cols x 7 rows @ 48px */
         flex-shrink: 0;
       }
 
@@ -937,6 +937,47 @@
         transform: translate(-50%, 0);
       }
 
+      #context-lost-banner {
+        display: none;
+        position: absolute;
+        inset: 0;
+        z-index: 70;
+        background: rgba(6, 4, 10, 0.92);
+        align-items: center;
+        justify-content: center;
+      }
+      #context-lost-banner.show {
+        display: flex;
+      }
+      .clb-inner {
+        text-align: center;
+        font-family: var(--font-pixel);
+        color: var(--amber-bright);
+        letter-spacing: 1.5px;
+      }
+      .clb-sub {
+        color: var(--subtext);
+        font-size: 11px;
+        margin-top: 8px;
+        letter-spacing: 0.5px;
+        text-transform: none;
+        max-width: 280px;
+      }
+      .clb-spinner {
+        width: 28px;
+        height: 28px;
+        margin: 0 auto 14px;
+        border: 4px solid var(--overlay);
+        border-top-color: var(--amber-bright);
+        border-radius: 50%;
+        animation: clbspin 0.8s linear infinite;
+      }
+      @keyframes clbspin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
       /* ---------- Virtual joystick (mobile/tablet) ---------- */
       #joystick {
         position: fixed;
@@ -1100,7 +1141,7 @@
         <div class="panel">
           <h2>How To Play</h2>
           <p>
-            Bayats are scattered across the arena and they do <b>not</b> want to
+            bayats are scattered across the arena and they do <b>not</b> want to
             be hugged. Chase them down, get close, and hug them before time runs
             out.
           </p>
@@ -1112,18 +1153,18 @@
           </div>
           <h3>Arcade Mode</h3>
           <p>
-            You get 60 seconds. Hug as many Bayats as possible. You
+            You get 60 seconds. Hug as many bayats as possible. You
             automatically get stronger as you level up &mdash; no choices, just
             chaos.
           </p>
           <h3>Full Game Mode</h3>
           <p>
-            Instead of health, you have a countdown timer. Hugging Bayats adds
+            Instead of health, you have a countdown timer. Hugging bayats adds
             time back &mdash; but the bonus shrinks the longer you survive, so
             you'll always need the next hug. Level up to choose upgrades and
             unlock tools.
           </p>
-          <h3>Bayat Types</h3>
+          <h3>bayat Types</h3>
           <ul>
             <li><b>Normal</b> &mdash; balanced.</li>
             <li><b>Fast »</b> &mdash; hard to catch, worth more.</li>
@@ -1276,6 +1317,15 @@
       </div>
       <div id="combo-banner"></div>
       <div id="event-toast"></div>
+      <div id="context-lost-banner">
+        <div class="clb-inner">
+          <div class="clb-spinner"></div>
+          <div>RECOVERING GRAPHICS&hellip;</div>
+          <div class="clb-sub">
+            Your progress is safe — this takes a second on some phones.
+          </div>
+        </div>
+      </div>
 
       <div id="joystick">
         <div class="joystick-base"></div>
@@ -1352,14 +1402,17 @@
    ========================================================= */
         const ASSETS = {
           player: "assets/gohid.png",
-          BAYAT: "assets/nanbaiat.png",
+          bayat: "assets/nanbaiat.png",
+          buddy: "assets/buddy.png",
         };
 
         const Sprites = {
           player: null,
-          BAYAT: null,
+          bayat: null,
+          buddy: null,
           playerLoaded: false,
-          BAYATLoaded: false,
+          bayatLoaded: false,
+          buddyLoaded: false,
         };
         function loadSprite(key, src) {
           const img = new Image();
@@ -1373,7 +1426,8 @@
           Sprites[key] = img;
         }
         loadSprite("player", ASSETS.player);
-        loadSprite("BAYAT", ASSETS.BAYAT);
+        loadSprite("bayat", ASSETS.bayat);
+        loadSprite("buddy", ASSETS.buddy);
 
         /* =========================================================
    UTILITIES
@@ -1459,9 +1513,9 @@
             minInterval: 0.22,
             rampDuration: 220,
           },
-          BAYATBaseSpeed: 100,
-          BAYATBaseRadius: 30,
-          // ---- new BAYAT ability configs (all tunable in one place) ----
+          bayatBaseSpeed: 118,
+          bayatBaseRadius: 20,
+          // ---- new bayat ability configs (all tunable in one place) ----
           boost: {
             duration: 8,
           },
@@ -1490,14 +1544,14 @@
           },
         };
 
-        /* BAYAT types: visual identity is created entirely from ONE base PNG.
+        /* bayat types: visual identity is created entirely from ONE base PNG.
    Color variants are produced by SpriteTint (see below), which recolors
    only the visible (alpha>0) pixels of the sprite and leaves transparent
    pixels fully transparent — no colored fringing, no filter hacks. */
-        const BAYAT_TYPES = {
+        const bayat_TYPES = {
           normal: {
             key: "normal",
-            label: "BAYAT",
+            label: "bayat",
             speedMult: 1.0,
             sizeMult: 1.0,
             expMult: 1.0,
@@ -1519,7 +1573,7 @@
           },
           fast: {
             key: "fast",
-            label: "Fast BAYAT",
+            label: "Fast bayat",
             speedMult: 1.75,
             sizeMult: 0.88,
             expMult: 1.35,
@@ -1541,7 +1595,7 @@
           },
           slow: {
             key: "slow",
-            label: "Slow BAYAT",
+            label: "Slow bayat",
             speedMult: 0.55,
             sizeMult: 1.12,
             expMult: 0.7,
@@ -1563,7 +1617,7 @@
           },
           tiny: {
             key: "tiny",
-            label: "Tiny BAYAT",
+            label: "Tiny bayat",
             speedMult: 1.25,
             sizeMult: 0.55,
             expMult: 1.25,
@@ -1585,7 +1639,7 @@
           },
           giant: {
             key: "giant",
-            label: "Giant BAYAT",
+            label: "Giant bayat",
             speedMult: 0.42,
             sizeMult: 1.9,
             expMult: 1.9,
@@ -1607,7 +1661,7 @@
           },
           dangerous: {
             key: "dangerous",
-            label: "DANGEROUS BAYAT",
+            label: "DANGEROUS bayat",
             speedMult: 0.55,
             sizeMult: 1.0,
             expMult: 0.0,
@@ -1629,7 +1683,7 @@
           },
           golden: {
             key: "golden",
-            label: "GOLDEN BAYAT",
+            label: "GOLDEN bayat",
             speedMult: 2.1,
             sizeMult: 0.85,
             expMult: 4.2,
@@ -1651,7 +1705,7 @@
           },
           boost: {
             key: "boost",
-            label: "BOOST BAYAT",
+            label: "BOOST bayat",
             speedMult: 1.15,
             sizeMult: 0.95,
             expMult: 1.5,
@@ -1674,7 +1728,7 @@
           },
           snowball: {
             key: "snowball",
-            label: "Snowball BAYAT",
+            label: "Snowball bayat",
             speedMult: 0.85,
             sizeMult: 1.0,
             expMult: 1.4,
@@ -1697,12 +1751,12 @@
           },
           bomb: {
             key: "bomb",
-            label: "BOMB BAYAT",
+            label: "BOMB bayat",
             speedMult: 0.7,
             sizeMult: 1.05,
             expMult: 2.0,
             rewardMult: 1.8,
-            color: "#992323",
+            color: "#3a2020",
             dark: "#1a0d0d",
             weightBase: 1.4,
             minDiff: 0.14,
@@ -1710,7 +1764,7 @@
             danger: false,
             glow: false,
             bombType: true,
-            tintColor: "##992323",
+            tintColor: "#2a1010",
             tintStrength: 0.75,
             badge: "",
             badgeColor: "#ff8a3d",
@@ -1720,7 +1774,7 @@
           },
         };
 
-        /* Boost BAYAT reward pool — hugging one grants a random temporary buff.
+        /* Boost bayat reward pool — hugging one grants a random temporary buff.
    Reuses the same Game.tempEffects system as curses/Turbo Surge, so it
    shows up in the Inventory "Temp Effects" tab automatically. */
         const BOOST_POOL = [
@@ -1865,7 +1919,7 @@
             name: "Black Hole",
             icon: "🕳️",
             maxLevel: 3,
-            desc: (l) => `Pulls nearby BAYATS toward you (str ${l})`,
+            desc: (l) => `Pulls nearby bayats toward you (str ${l})`,
             apply: (p, l) => {
               p.blackHoleLevel = l;
             },
@@ -1885,7 +1939,7 @@
             name: "Four Leaf Clover",
             icon: "🍀",
             maxLevel: 4,
-            desc: (l) => `+${12 * l}% luck (rarer BAYATS appear more)`,
+            desc: (l) => `+${12 * l}% luck (rarer bayats appear more)`,
             apply: (p, l) => {
               p.luckMult = 1 + 0.12 * l;
             },
@@ -1896,7 +1950,7 @@
             icon: "🫳",
             maxLevel: 4,
             desc: (l) =>
-              `BAYATS that get close to your hug range are slowed down (Lv${l})`,
+              `bayats that get close to your hug range are slowed down (Lv${l})`,
             apply: (p, l) => {
               p.stickyArmsLevel = l;
             },
@@ -1951,7 +2005,7 @@
             icon: "👯",
             maxLevel: 3,
             desc: (l) =>
-              `${8 * l}% chance to catch a second nearby BAYAT in one hug`,
+              `${8 * l}% chance to catch a second nearby bayat in one hug`,
             apply: (p, l) => {
               p.doubleHugChance = 0.08 * l;
             },
@@ -2023,9 +2077,31 @@
             name: "Thick Skin",
             icon: "🛡️",
             maxLevel: 4,
-            desc: (l) => `Dangerous BAYATS cost you ${20 * l}% less time`,
+            desc: (l) => `Dangerous bayats cost you ${20 * l}% less time`,
             apply: (p, l) => {
               p.thickSkinMult = 1 - Math.min(0.8, 0.2 * l);
+            },
+          },
+          {
+            id: "guardianhug",
+            name: "Guardian Hug",
+            icon: "🐻",
+            maxLevel: 3,
+            desc: (l) =>
+              `${l} time(s) this run, hitting 0 refills you instead of ending the run`,
+            apply: (p, l) => {
+              p.guardianTotal = l;
+            },
+          },
+          {
+            id: "adrenaline",
+            name: "Adrenaline Rush",
+            icon: "💉",
+            maxLevel: 4,
+            desc: (l) =>
+              `+${10 * l}% speed & hug range when your time is running low`,
+            apply: (p, l) => {
+              p.adrenalineLevel = l;
             },
           },
         ];
@@ -2038,7 +2114,7 @@
             maxLevel: 5,
             baseCooldown: 3.2,
             desc: (l) =>
-              `Yanks ${1 + Math.floor(l / 2)} nearby BAYAT(s) to you.`,
+              `Yanks ${1 + Math.floor(l / 2)} nearby bayat(s) to you.`,
             range: (l) => 320 + l * 50,
             targets: (l) => 1 + Math.floor(l / 2),
           },
@@ -2048,7 +2124,7 @@
             icon: "🍰",
             maxLevel: 5,
             baseCooldown: 5.5,
-            desc: (l) => `Drops a tasty cake that pulls nearby BAYATS in.`,
+            desc: (l) => `Drops a tasty cake that pulls nearby bayats in.`,
             range: (l) => 170 + l * 35,
           },
           {
@@ -2057,7 +2133,7 @@
             icon: "🪢",
             maxLevel: 5,
             baseCooldown: 6.0,
-            desc: (l) => `Throws a snare that drags trapped BAYATS to you.`,
+            desc: (l) => `Throws a snare that drags trapped bayats to you.`,
             range: (l) => 220 + l * 40,
           },
           {
@@ -2075,7 +2151,7 @@
             icon: "💎",
             maxLevel: 5,
             baseCooldown: 9.0,
-            desc: (l) => `Freezes every BAYAT around you briefly.`,
+            desc: (l) => `Freezes every bayat around you briefly.`,
             range: (l) => 190 + l * 30,
           },
           {
@@ -2084,7 +2160,7 @@
             icon: "❄️",
             maxLevel: 5,
             baseCooldown: 4.5,
-            desc: (l) => `Lobs a slow zone at the nearest BAYAT crowd.`,
+            desc: (l) => `Lobs a slow zone at the nearest bayat crowd.`,
             range: (l) => 260 + l * 40,
           },
           {
@@ -2093,7 +2169,7 @@
             icon: "🌀",
             maxLevel: 5,
             baseCooldown: 6.0,
-            desc: (l) => `Sucks up to ${3 + l * 2} BAYATS in a wide radius.`,
+            desc: (l) => `Sucks up to ${3 + l * 2} bayats in a wide radius.`,
             range: (l) => 260 + l * 45,
           },
           {
@@ -2111,7 +2187,7 @@
             icon: "🪃",
             maxLevel: 5,
             baseCooldown: 5.0,
-            desc: (l) => `Flies out and yanks BAYATS back with it on return.`,
+            desc: (l) => `Flies out and yanks bayats back with it on return.`,
             range: (l) => 300 + l * 40,
           },
           {
@@ -2120,7 +2196,7 @@
             icon: "🥅",
             maxLevel: 5,
             baseCooldown: 6.5,
-            desc: (l) => `Traps nearby BAYATS in place briefly.`,
+            desc: (l) => `Traps nearby bayats in place briefly.`,
             range: (l) => 200 + l * 30,
           },
           {
@@ -2129,7 +2205,7 @@
             icon: "🍌",
             maxLevel: 5,
             baseCooldown: 5.5,
-            desc: (l) => `BAYATS slip on it and stumble toward you.`,
+            desc: (l) => `bayats slip on it and stumble toward you.`,
             range: (l) => 230 + l * 35,
           },
           {
@@ -2138,7 +2214,7 @@
             icon: "🌟",
             maxLevel: 5,
             baseCooldown: 10.0,
-            desc: (l) => `Warps you straight to the nearest BAYAT crowd.`,
+            desc: (l) => `Warps you straight to the nearest bayat crowd.`,
             range: (l) => 700 + l * 80,
           },
           {
@@ -2147,7 +2223,7 @@
             icon: "⏰",
             maxLevel: 5,
             baseCooldown: 8.0,
-            desc: (l) => `Startles and slows every BAYAT nearby.`,
+            desc: (l) => `Startles and slows every bayat nearby.`,
             range: (l) => 320 + l * 45,
           },
 
@@ -2159,7 +2235,7 @@
             maxLevel: 5,
             kind: "aura",
             desc: (l) =>
-              `Constant aura slows BAYATS & gently pushes Dangerous ones away.`,
+              `Constant aura slows bayats & gently pushes Dangerous ones away.`,
             range: (l) => 110 + l * 18,
           },
           {
@@ -2193,7 +2269,7 @@
             baseCooldown: 6.5,
             kind: "projectile",
             desc: (l) =>
-              `Lobbed at the BAYAT crowd; explodes into a pulling blast + lingering zone.`,
+              `Lobbed at the bayat crowd; explodes into a pulling blast + lingering zone.`,
             range: (l) => 340 + l * 40,
             travel: 0.5,
           },
@@ -2204,7 +2280,7 @@
             maxLevel: 5,
             baseCooldown: 5.0,
             desc: (l) =>
-              `Zaps ${1 + Math.floor(l / 2)} random nearby BAYATS, yanking them to you instantly.`,
+              `Zaps ${1 + Math.floor(l / 2)} random nearby bayats, yanking them to you instantly.`,
             range: (l) => 300 + l * 40,
             targets: (l) => 1 + Math.floor(l / 2),
           },
@@ -2216,7 +2292,7 @@
             baseCooldown: 4.2,
             kind: "missile",
             desc: (l) =>
-              `Homes in on the nearest BAYAT and reels it in on arrival.`,
+              `Homes in on the nearest bayat and reels it in on arrival.`,
             range: (l) => 500 + l * 60,
             travel: 0.6,
           },
@@ -2240,14 +2316,34 @@
             baseCooldown: 9.0,
             kind: "zone",
             desc: (l) =>
-              `Leaves a lingering cloud that slows any BAYAT standing in it.`,
+              `Leaves a lingering cloud that slows any bayat standing in it.`,
             range: (l) => 170 + l * 25,
             zoneDuration: (l) => 3 + l * 0.8,
+          },
+          {
+            id: "anchor",
+            name: "Anchor",
+            icon: "⚓",
+            maxLevel: 5,
+            baseCooldown: 9.5,
+            desc: (l) =>
+              `Pulls the crowd around you to a random nearby spot and holds them there.`,
+            range: (l) => 260 + l * 40,
+          },
+          {
+            id: "partyhorn",
+            name: "Party Horn",
+            icon: "📯",
+            maxLevel: 5,
+            kind: "aura",
+            tickInterval: 4,
+            desc: (l) =>
+              `Every few seconds, keeps an active combo alive even without a hug.`,
           },
         ];
 
         /* Pixel-art icon sprite sheet lookup: id -> [col,row] cell in assets/icons.png
-   (8 columns x 5 rows, 48px cells). Falls back to the def's emoji if an id
+   (8 columns x 7 rows, 48px cells). Falls back to the def's emoji if an id
    isn't in the sheet, so nothing ever renders blank. */
         const ICON_SPRITE = {
           shoes: [0, 0],
@@ -2269,27 +2365,37 @@
           quicktoss: [0, 2],
           secondwind: [1, 2],
           thickskin: [2, 2],
-          hook: [3, 2],
-          cake: [4, 2],
-          rope: [5, 2],
-          ring: [6, 2],
-          gem: [7, 2],
-          snowball: [0, 3],
-          vacuum: [1, 3],
-          magnet: [2, 3],
-          boomerang: [3, 3],
-          net: [4, 3],
-          banana: [5, 3],
-          teleporter: [6, 3],
-          alarm: [7, 3],
-          cuddleaura: [0, 4],
-          comfortaura: [1, 4],
-          orbitbuddies: [2, 4],
-          confetti: [3, 4],
-          staticcling: [4, 4],
-          heartmissile: [5, 4],
-          carepackage: [6, 4],
-          glittercloud: [7, 4],
+          guardianhug: [3, 2],
+          adrenaline: [4, 2],
+          hook: [5, 2],
+          cake: [6, 2],
+          rope: [7, 2],
+          ring: [0, 3],
+          gem: [1, 3],
+          snowball: [2, 3],
+          vacuum: [3, 3],
+          magnet: [4, 3],
+          boomerang: [5, 3],
+          net: [6, 3],
+          banana: [7, 3],
+          teleporter: [0, 4],
+          alarm: [1, 4],
+          cuddleaura: [2, 4],
+          comfortaura: [3, 4],
+          orbitbuddies: [4, 4],
+          confetti: [5, 4],
+          staticcling: [6, 4],
+          heartmissile: [7, 4],
+          carepackage: [0, 5],
+          glittercloud: [1, 5],
+          anchor: [2, 5],
+          partyhorn: [3, 5],
+          gravitywell: [4, 5],
+          cryocore: [5, 5],
+          stormcaller: [6, 5],
+          bigbang: [7, 5],
+          bestbuds: [0, 6],
+          fortunesfavor: [1, 6],
         };
         function iconHTML(id, sizePx, fallbackEmoji) {
           const cell = ICON_SPRITE[id];
@@ -2297,7 +2403,7 @@
             return `<span style="font-size:${sizePx}px;line-height:1;">${fallbackEmoji || "\u2726"}</span>`;
           const cellSize = 48;
           const scale = sizePx / cellSize;
-          return `<div class="pixel-icon" style="width:${sizePx}px;height:${sizePx}px;background-position:-${cell[0] * cellSize * scale}px -${cell[1] * cellSize * scale}px;background-size:${384 * scale}px ${240 * scale}px;"></div>`;
+          return `<div class="pixel-icon" style="width:${sizePx}px;height:${sizePx}px;background-position:-${cell[0] * cellSize * scale}px -${cell[1] * cellSize * scale}px;background-size:${384 * scale}px ${336 * scale}px;"></div>`;
         }
 
         /* =========================================================
@@ -2336,7 +2442,7 @@
               { id: "snowball", minLevel: 3 },
               { id: "stickyarms", minLevel: 3 },
             ],
-            desc: "Hugging a frozen BAYAT gives +40% bonus reward.",
+            desc: "Hugging a frozen bayat gives +40% bonus reward.",
           },
           {
             id: "bladeStorm",
@@ -2356,7 +2462,127 @@
               { id: "staticcling", minLevel: 3 },
               { id: "longarms", minLevel: 3 },
             ],
-            desc: "Static Cling zaps 2 extra BAYATS per cast.",
+            desc: "Static Cling zaps 2 extra bayats per cast.",
+          },
+        ];
+
+        /* =========================================================
+   SYNERGIES — chest-triggered combinations. Unlike EVOLUTIONS
+   above (which unlock automatically once both parts reach a
+   level), a synergy just requires OWNING both parts (any level),
+   and is only granted the next time a chest is opened. It hands
+   over a brand new tool (`resultTool`) that is stronger than
+   either part alone, is added straight to the player's tools,
+   and — because it's never part of STAT_UPGRADES/TOOL_DEFS and
+   is immediately marked "owned" — can never be picked again or
+   leveled up. One-time, permanent, fixed-strength.
+   Add more entries here to add more combos.
+   ========================================================= */
+        const SYNERGIES = [
+          {
+            id: "gravitywell",
+            name: "Gravity Well",
+            icon: "🌌",
+            parts: ["blackhole", "vacuum"],
+            desc: "Black Hole + Vacuum fuse into a permanent, powerful singularity.",
+            resultTool: {
+              id: "gravitywell",
+              name: "Gravity Well",
+              icon: "🌌",
+              maxLevel: 1,
+              kind: "aura",
+              desc: () =>
+                "A permanent singularity around you — constantly reels in every bayat nearby and shoves away anything dangerous. Stronger than Black Hole or Vacuum alone. Cannot be upgraded further.",
+              range: () => 300,
+            },
+          },
+          {
+            id: "cryocore",
+            name: "Cryo Core",
+            icon: "❄️",
+            parts: ["snowball", "gem"],
+            desc: "Snowball + Gem of Time fuse into a huge, frequent freeze pulse.",
+            resultTool: {
+              id: "cryocore",
+              name: "Cryo Core",
+              icon: "❄️",
+              maxLevel: 1,
+              baseCooldown: 6.5,
+              desc: () =>
+                "A large, frequent pulse that freezes every bayat around you — bigger range and shorter cooldown than Gem of Time alone. Cannot be upgraded further.",
+              range: () => 260,
+            },
+          },
+          {
+            id: "stormcaller",
+            name: "Storm Caller",
+            icon: "⛈️",
+            parts: ["staticcling", "ring"],
+            desc: "Static Cling + Ring of Magic fuse into a zapping, pulling storm.",
+            resultTool: {
+              id: "stormcaller",
+              name: "Storm Caller",
+              icon: "⛈️",
+              maxLevel: 1,
+              baseCooldown: 5.5,
+              desc: () =>
+                "Zaps a handful of bayats instantly while pulling and slowing everything else in a huge radius. Cannot be upgraded further.",
+              range: () => 360,
+            },
+          },
+          {
+            id: "bigbang",
+            name: "Big Bang",
+            icon: "💥",
+            parts: ["confetti", "carepackage"],
+            desc: "Confetti Bomb + Care Package fuse into one devastating blast.",
+            resultTool: {
+              id: "bigbang",
+              name: "Big Bang",
+              icon: "💥",
+              maxLevel: 1,
+              baseCooldown: 11,
+              desc: () =>
+                "A rare, massive blast that freezes, pulls, and showers the whole area in reward-boosting confetti. Cannot be upgraded further.",
+              range: () => 320,
+            },
+          },
+          {
+            id: "bestbuds",
+            name: "Best Buds",
+            icon: "👯",
+            parts: ["orbitbuddies", "doublehug"],
+            desc: "Orbit Buddies + Double Hug fuse into a squad that chain-catches.",
+            resultTool: {
+              id: "bestbuds",
+              name: "Best Buds",
+              icon: "👯",
+              maxLevel: 1,
+              kind: "orbit",
+              desc: () =>
+                "3 orbiting buddies that each have a chance to catch a second nearby bayat on contact. Cannot be upgraded further.",
+              range: () => 70,
+            },
+          },
+          {
+            id: "fortunesfavor",
+            name: "Fortune's Favor",
+            icon: "🍀",
+            parts: ["luckysocks", "amulet"],
+            desc: "Lucky Socks + Amulet of EXP fuse into a permanent stroke of fortune.",
+            resultTool: {
+              id: "fortunesfavor",
+              name: "Fortune's Favor",
+              icon: "🍀",
+              maxLevel: 1,
+              kind: "passive",
+              desc: () =>
+                "Instantly and permanently boosts your EXP gain and chest luck. A one-time blessing — cannot be upgraded further.",
+              onGrant: (p) => {
+                p.expMult *= 1.25;
+                p.chestLuckMult *= 1.25;
+              },
+            },
           },
         ];
 
@@ -2509,7 +2735,7 @@
             spawnDangerMult: 1,
             chestLuckMult: 1,
             playerSpeedMult: 1,
-            BAYATSpeedMult: 1,
+            bayatSpeedMult: 1,
             floorTiles: [
               { color: "#233522", weight: 10 },
               { color: "#2a3e28", weight: 8 },
@@ -2524,9 +2750,9 @@
           {
             id: "graveyard",
             name: "Haunted Graveyard",
-            desc: "Fog, tombstones, and BAYATS that don\u2019t scare easy.",
+            desc: "Fog, tombstones, and bayats that don\u2019t scare easy.",
             difficulty: "Medium",
-            modifierText: "+35% Dangerous BAYAT frequency.",
+            modifierText: "+35% Dangerous bayat frequency.",
             bg: "#0d0d14",
             accent: "#8a7bbf",
             decorPalette: ["#2b2b38", "#1f1f2c", "#3a3a4a"],
@@ -2535,7 +2761,7 @@
             spawnDangerMult: 1.35,
             chestLuckMult: 1,
             playerSpeedMult: 1,
-            BAYATSpeedMult: 1,
+            bayatSpeedMult: 1,
             floorTiles: [
               { color: "#231f26", weight: 10 },
               { color: "#2a2530", weight: 7 },
@@ -2561,7 +2787,7 @@
             spawnDangerMult: 0.9,
             chestLuckMult: 1.5,
             playerSpeedMult: 1,
-            BAYATSpeedMult: 1,
+            bayatSpeedMult: 1,
             floorTiles: [
               { color: "#1c2536", weight: 10 },
               { color: "#212c40", weight: 8 },
@@ -2578,7 +2804,7 @@
             name: "Burning Wasteland",
             desc: "Cracked earth and heat haze. Everything moves faster.",
             difficulty: "Hard",
-            modifierText: "+15% BAYAT speed, +20% rewards.",
+            modifierText: "+15% bayat speed, +20% rewards.",
             bg: "#1c0f0a",
             accent: "#ff7a3d",
             decorPalette: ["#3d2416", "#4a2c1a", "#2a1810"],
@@ -2587,7 +2813,7 @@
             spawnDangerMult: 1.15,
             chestLuckMult: 1,
             playerSpeedMult: 1,
-            BAYATSpeedMult: 1.15,
+            bayatSpeedMult: 1.15,
             rewardMult: 1.2,
             floorTiles: [
               { color: "#2a1811", weight: 10 },
@@ -2605,7 +2831,7 @@
             name: "Frozen Ruins",
             desc: "Slippery ice and old broken statues. Slow and tense.",
             difficulty: "Hard",
-            modifierText: "-10% player & BAYAT speed, longer freezes.",
+            modifierText: "-10% player & bayat speed, longer freezes.",
             bg: "#0d1620",
             accent: "#9adfff",
             decorPalette: ["#22374a", "#2c4258", "#1a2836"],
@@ -2614,7 +2840,7 @@
             spawnDangerMult: 1,
             chestLuckMult: 1.1,
             playerSpeedMult: 0.9,
-            BAYATSpeedMult: 0.9,
+            bayatSpeedMult: 0.9,
             floorTiles: [
               { color: "#182838", weight: 10 },
               { color: "#1e3040", weight: 8 },
@@ -2632,10 +2858,10 @@
    SAVE SYSTEM
    ========================================================= */
         const SaveSystem = {
-          KEY_ARCADE: "BAYATHug_arcadeHighScore",
-          KEY_FULL: "BAYATHug_fullGameBestTime",
-          KEY_SETTINGS: "BAYATHug_settings",
-          KEY_LIFETIME: "BAYATHug_lifetimeHugs",
+          KEY_ARCADE: "bayatHug_arcadeHighScore",
+          KEY_FULL: "bayatHug_fullGameBestTime",
+          KEY_SETTINGS: "bayatHug_settings",
+          KEY_LIFETIME: "bayatHug_lifetimeHugs",
           // In-memory fallback used whenever localStorage isn't available (private
           // browsing on iOS Safari throws on every setItem, some Android WebViews
           // disable storage entirely, quota can fill up, etc). Scores still work
@@ -3278,19 +3504,34 @@
             this.hurtFlashT = 0;
             this.trail = []; // afterimage points while turbo-boosted
             this.snowSlowMult = 1;
+            this.guardianTotal = 0;
+            this.guardianUsed = 0;
+            this.adrenalineLevel = 0;
+          }
+          get adrenalineMult() {
+            if (!this.adrenalineLevel) return 1;
+            const maxRef =
+              Game.mode === "full"
+                ? Game.maxStoredTime || 30
+                : CONFIG.arcade.duration;
+            const frac = clamp((Game.timer || 0) / maxRef, 0, 1);
+            const urgency = clamp(1 - frac * 2.5, 0, 1); // kicks in once time drops under ~40%
+            return 1 + this.adrenalineLevel * 0.1 * urgency;
           }
           get speed() {
             let s = CONFIG.player.baseSpeed * this.speedMult;
             if (this.turboBoostT > 0) s *= 1 + (0.2 + this.turboLevel * 0.08);
             if (Game.arena) s *= Game.arena.playerSpeedMult;
             s *= this.snowSlowMult;
+            s *= this.adrenalineMult;
             return s;
           }
           get hugRadius() {
             return (
               CONFIG.player.baseHugRadius *
               this.hugRadiusMult *
-              (1 + this.longArmsBonus)
+              (1 + this.longArmsBonus) *
+              this.adrenalineMult
             );
           }
           get totalExpMult() {
@@ -3503,23 +3744,23 @@
         }
 
         /* =========================================================
-   BAYAT
+   bayat
    ========================================================= */
-        let BAYAT_UID = 1;
-        class BAYAT {
+        let bayat_UID = 1;
+        class bayat {
           constructor(type, x, y, difficulty) {
-            this.id = BAYAT_UID++;
+            this.id = bayat_UID++;
             this.type = type;
             this.x = x;
             this.y = y;
             this.vx = 0;
             this.vy = 0;
-            this.radius = CONFIG.BAYATBaseRadius * type.sizeMult;
+            this.radius = CONFIG.bayatBaseRadius * type.sizeMult;
             this.baseSpeed =
-              CONFIG.BAYATBaseSpeed *
+              CONFIG.bayatBaseSpeed *
               type.speedMult *
               (1 + difficulty * 0.35) *
-              (Game.arena ? Game.arena.BAYATSpeedMult : 1);
+              (Game.arena ? Game.arena.bayatSpeedMult : 1);
             if (type.bombType) this.baseSpeed *= CONFIG.bomb.movementSpeedMult;
             this.wanderAngle = Math.random() * TAU;
             this.animT = Math.random() * 10;
@@ -3535,6 +3776,9 @@
             this.bombState = "idle";
             this.bombTimer = 0;
             this.flickerSeed = Math.random() * 10;
+            this.anchorT = 0;
+            this.anchorX = 0;
+            this.anchorY = 0;
           }
           get effectiveSpeed() {
             let s = this.baseSpeed;
@@ -3564,6 +3808,19 @@
               this.hookedT -= dt;
               const a = Math.atan2(player.y - this.y, player.x - this.x);
               const pull = 620;
+              this.vx = Math.cos(a) * pull;
+              this.vy = Math.sin(a) * pull;
+              this.x += this.vx * dt;
+              this.y += this.vy * dt;
+              return;
+            }
+            if (this.anchorT > 0) {
+              this.anchorT -= dt;
+              const a = Math.atan2(
+                this.anchorY - this.y,
+                this.anchorX - this.x,
+              );
+              const pull = 300;
               this.vx = Math.cos(a) * pull;
               this.vy = Math.sin(a) * pull;
               this.x += this.vx * dt;
@@ -3601,7 +3858,7 @@
               dy = this.y - player.y;
             const d = Math.sqrt(dx * dx + dy * dy) || 0.001;
             if (this.type.ranged) {
-              // Snowball BAYAT: keeps its distance and lobs snowballs from range
+              // Snowball bayat: keeps its distance and lobs snowballs from range
               this.throwCd -= dt;
               const keep = CONFIG.snowball.keepDistance;
               if (d < keep) {
@@ -3763,7 +4020,7 @@
             ctx.fillStyle = "rgba(0,0,0,.32)";
             ctx.fill();
 
-            // Bomb BAYAT: tint flashes faster and brighter as detonation approaches
+            // Bomb bayat: tint flashes faster and brighter as detonation approaches
             let tintColorOverride = this.type.tintColor,
               tintStrengthOverride = this.type.tintStrength;
             let bombBlink = false;
@@ -3776,7 +4033,7 @@
               }
             }
 
-            if (Sprites.BAYATLoaded) {
+            if (Sprites.bayatLoaded) {
               ctx.save();
               const size = this.radius * 2.9;
               ctx.imageSmoothingEnabled = false;
@@ -3794,14 +4051,14 @@
               // (and partially-transparent edge pixels) are left exactly as they were.
               const tinted =
                 this.frozenT > 0
-                  ? SpriteTint.getTinted("BAYAT", "#9adfff", 0.55)
+                  ? SpriteTint.getTinted("bayat", "#9adfff", 0.55)
                   : SpriteTint.getTinted(
-                      "BAYAT",
+                      "bayat",
                       tintColorOverride,
                       tintStrengthOverride,
                     );
               ctx.drawImage(
-                tinted || Sprites.BAYAT,
+                tinted || Sprites.bayat,
                 -size / 2,
                 -size / 2,
                 size,
@@ -3810,7 +4067,7 @@
               ctx.shadowBlur = 0;
               ctx.restore();
             } else {
-              // ---- procedural fallback (used if BAYAT.png fails to load) ----
+              // ---- procedural fallback (used if bayat.png fails to load) ----
               if (this.type.glow) {
                 ctx.shadowColor = "#ffd76a";
                 ctx.shadowBlur = 22;
@@ -3904,7 +4161,7 @@
                 ctx.fill();
               }
             }
-            // fuse + spark accessory — makes the Bomb BAYAT read as an obvious explosive
+            // fuse + spark accessory — makes the Bomb bayat read as an obvious explosive
             if (this.type.bombType) {
               const fuseTop = -this.radius - 7;
               ctx.strokeStyle = "#6b4a26";
@@ -3963,9 +4220,9 @@
         }
 
         /* =========================================================
-   BAYAT MANAGER
+   bayat MANAGER
    ========================================================= */
-        class BAYATManager {
+        class bayatManager {
           constructor() {
             this.list = [];
             this.spawnTimer = 0;
@@ -3979,8 +4236,8 @@
           }
           pickType(diff, luck) {
             const pool = [];
-            for (const key in BAYAT_TYPES) {
-              const t = BAYAT_TYPES[key];
+            for (const key in bayat_TYPES) {
+              const t = bayat_TYPES[key];
               if (diff < t.minDiff) continue;
               let w = t.weightBase;
               if (t.key === "golden") w *= luck;
@@ -4012,7 +4269,7 @@
               );
               tries++;
             } while (dist(x, y, player.x, player.y) < 300 && tries < 8);
-            const n = new BAYAT(type, x, y, diff);
+            const n = new bayat(type, x, y, diff);
             this.list.push(n);
             if (type.key === "golden") Game.onGoldenEvent();
             return n;
@@ -4180,35 +4437,37 @@
               this.active[def.id] = { def, level: 0, cd: 0 };
             this.active[def.id].level = level;
           }
-          update(dt, player, BAYATManager) {
+          update(dt, player, bayatManager) {
             for (const id in this.active) {
               const t = this.active[id];
               if (t.def.kind === "aura") {
-                this.tickAura(t, dt, player, BAYATManager);
+                this.tickAura(t, dt, player, bayatManager);
                 continue;
               }
               if (t.def.kind === "orbit") {
-                this.tickOrbit(t, dt, player, BAYATManager);
+                this.tickOrbit(t, dt, player, bayatManager);
                 continue;
               }
               if (!t.def.baseCooldown) continue;
               t.cd -= dt;
               if (t.cd <= 0) {
-                this.fire(t, player, BAYATManager);
+                this.fire(t, player, bayatManager);
                 t.cd =
                   t.def.baseCooldown * player.cooldownMult * rand(0.96, 1.04);
               }
             }
           }
           tickAura(t, dt, player, nm) {
-            const range = t.def.range(t.level) * (player.wideArmsMult || 1);
+            const range = t.def.range
+              ? t.def.range(t.level) * (player.wideArmsMult || 1)
+              : 0;
             if (t.def.id === "cuddleaura") {
               const targets = nm.inRadius(player.x, player.y, range);
               for (const n of targets) {
                 if (!n.type.danger) {
                   n.slowT = Math.max(n.slowT, 0.2);
                 } else {
-                  // gently push dangerous BAYATS back out of the aura
+                  // gently push dangerous bayats back out of the aura
                   const a = Math.atan2(n.y - player.y, n.x - player.x);
                   n.x += Math.cos(a) * 40 * dt;
                   n.y += Math.sin(a) * 40 * dt;
@@ -4252,10 +4511,55 @@
                   );
                 }
               }
+            } else if (t.def.id === "partyhorn") {
+              t.timer = (t.timer || 0) - dt;
+              if (t.timer <= 0) {
+                t.timer = Math.max(2, t.def.tickInterval - t.level * 0.4);
+                if (Game.combo > 1) {
+                  Game.lastHugTime = Game.elapsed; // refresh the combo window so it can't decay right now
+                  Game.particles.text(
+                    player.x,
+                    player.y - 34,
+                    "PARTY!",
+                    "#ff7ab8",
+                    15,
+                  );
+                  Game.particles.burst(player.x, player.y, "#ff7ab8", 14, {
+                    maxSpeed: 130,
+                    minLife: 0.3,
+                    maxLife: 0.6,
+                  });
+                  AudioSystem.toolFire();
+                }
+              }
+            } else if (t.def.id === "gravitywell") {
+              // Synergy result (Black Hole + Vacuum): a permanent, always-on strong
+              // pull — non-dangerous bayats get a steady stream of near-guaranteed
+              // catches, dangerous ones get firmly shoved back out.
+              const targets = nm.inRadius(player.x, player.y, range);
+              for (const n of targets) {
+                if (!n.type.danger) {
+                  n.hookedT = Math.max(n.hookedT, 0.3);
+                } else {
+                  const a = Math.atan2(n.y - player.y, n.x - player.x);
+                  n.x += Math.cos(a) * 90 * dt;
+                  n.y += Math.sin(a) * 90 * dt;
+                }
+              }
+              if (Math.random() < 0.6)
+                Game.particles.burst(player.x, player.y, "#a970ff", 2, {
+                  minLife: 0.3,
+                  maxLife: 0.65,
+                  minSize: 2,
+                  maxSize: 4,
+                  minSpeed: 20,
+                  maxSpeed: range * 0.55,
+                });
             }
           }
           tickOrbit(t, dt, player, nm) {
-            const count = 1 + t.level;
+            const isBestBuds = t.def.id === "bestbuds";
+            const count = isBestBuds ? 3 : 1 + t.level;
             const radius =
               t.def.range(t.level) * 1.6 * (player.wideArmsMult || 1);
             t.spin =
@@ -4264,7 +4568,10 @@
                 (1.6 +
                   (Game.evolvedSet && Game.evolvedSet.bladeStorm ? 1.2 : 0));
             const buddyCount =
-              count + (Game.evolvedSet && Game.evolvedSet.bladeStorm ? 2 : 0);
+              count +
+              (Game.evolvedSet && Game.evolvedSet.bladeStorm && !isBestBuds
+                ? 2
+                : 0);
             t.positions = [];
             if (!t.hitPulse) t.hitPulse = [];
             for (let i = 0; i < t.hitPulse.length; i++) {
@@ -4283,6 +4590,18 @@
               if (hit) {
                 Game.onHug(hit, true);
                 t.hitPulse[i] = 0.22;
+                if (isBestBuds && Math.random() < 0.4) {
+                  const second = nm.nearest(
+                    hit.x,
+                    hit.y,
+                    (n) =>
+                      n !== hit &&
+                      n.alive &&
+                      !n.type.danger &&
+                      dist(hit.x, hit.y, n.x, n.y) < 90,
+                  );
+                  if (second) Game.onHug(second, true);
+                }
               }
             }
           }
@@ -4757,6 +5076,156 @@
                 AudioSystem.toolFire();
                 break;
               }
+              case "anchor": {
+                const ang = Math.random() * TAU;
+                const dropX = clamp(
+                  player.x + Math.cos(ang) * 220,
+                  80,
+                  CONFIG.arena.width - 80,
+                );
+                const dropY = clamp(
+                  player.y + Math.sin(ang) * 220,
+                  80,
+                  CONFIG.arena.height - 80,
+                );
+                const dur = 1.4 + t.level * 0.3;
+                const targets = nm
+                  .inRadius(player.x, player.y, range)
+                  .filter((n) => !n.type.danger);
+                for (const n of targets) {
+                  n.anchorT = dur;
+                  n.anchorX = dropX;
+                  n.anchorY = dropY;
+                }
+                Game.particles.burst(dropX, dropY, "#7fd8e8", 24, {
+                  maxSpeed: 120,
+                  minLife: 0.4,
+                  maxLife: 0.8,
+                });
+                Game.telegraphs.push({
+                  x: dropX,
+                  y: dropY,
+                  r: 40 + t.level * 6,
+                  color: "#7fd8e8",
+                  t: 0.5,
+                  maxT: 0.5,
+                });
+                Game.shockwaves.push({
+                  x: player.x,
+                  y: player.y,
+                  color: "#7fd8e8",
+                  t: 0,
+                  duration: 0.3,
+                  maxR: range * 0.5,
+                });
+                if (targets.length) AudioSystem.toolFire();
+                break;
+              }
+              case "cryocore": {
+                // Synergy result (Snowball + Gem of Time): bigger, more frequent freeze
+                const targets = nm.inRadius(player.x, player.y, range);
+                for (const n of targets) {
+                  n.frozenT = Math.max(n.frozenT, 1.7);
+                  if (!n.type.danger) n.hookedT = Math.max(n.hookedT, 0.3);
+                }
+                Game.particles.burst(player.x, player.y, "#bfe9ff", 32, {
+                  maxSpeed: 150,
+                  minLife: 0.5,
+                  maxLife: 0.9,
+                });
+                Game.telegraphs.push({
+                  x: player.x,
+                  y: player.y,
+                  r: range,
+                  color: "#bfe9ff",
+                  t: 0.5,
+                  maxT: 0.5,
+                });
+                AudioSystem.toolFire();
+                break;
+              }
+              case "stormcaller": {
+                // Synergy result (Static Cling + Ring of Magic): instant zaps + a huge pull/slow pulse
+                const pool = nm
+                  .inRadius(player.x, player.y, range)
+                  .filter((n) => !n.type.danger);
+                const zapCount = Math.min(pool.length, 4);
+                for (let i = 0; i < zapCount; i++) {
+                  const idx = randInt(0, pool.length - 1);
+                  const n = pool.splice(idx, 1)[0];
+                  if (!n) continue;
+                  n.hookedT = Math.max(n.hookedT, 0.45);
+                  Game.lightningBolts.push({
+                    x1: player.x,
+                    y1: player.y,
+                    x2: n.x,
+                    y2: n.y,
+                    t: 0,
+                    dur: 0.2,
+                  });
+                }
+                const all = nm.inRadius(player.x, player.y, range);
+                for (const n of all) {
+                  n.slowT = Math.max(n.slowT, 1.3);
+                }
+                Game.particles.burst(player.x, player.y, "#a970ff", 30, {
+                  maxSpeed: 190,
+                  minLife: 0.5,
+                  maxLife: 0.9,
+                });
+                Game.telegraphs.push({
+                  x: player.x,
+                  y: player.y,
+                  r: range,
+                  color: "#a970ff",
+                  t: 0.5,
+                  maxT: 0.5,
+                });
+                AudioSystem.toolFire();
+                break;
+              }
+              case "bigbang": {
+                // Synergy result (Confetti Bomb + Care Package): a rare, devastating single blast
+                Game.telegraphs.push({
+                  x: player.x,
+                  y: player.y,
+                  r: range,
+                  color: "#ffd76a",
+                  t: 0.9,
+                  maxT: 0.9,
+                });
+                Game.delayedEffects.push({
+                  t: 0.9,
+                  fn: () => {
+                    const targets = nm.inRadius(player.x, player.y, range);
+                    for (const n of targets) {
+                      n.frozenT = Math.max(n.frozenT, 1.6);
+                      if (!n.type.danger) n.hookedT = Math.max(n.hookedT, 0.4);
+                    }
+                    Game.particles.burst(player.x, player.y, "#ff9dc9", 50, {
+                      maxSpeed: 280,
+                      minLife: 0.4,
+                      maxLife: 0.85,
+                    });
+                    Game.particles.burst(player.x, player.y, "#ffd76a", 34, {
+                      maxSpeed: 220,
+                      minLife: 0.4,
+                      maxLife: 0.8,
+                    });
+                    Game.shockwaves.push({
+                      x: player.x,
+                      y: player.y,
+                      color: "#ff9dc9",
+                      t: 0,
+                      duration: 0.5,
+                      maxR: range,
+                    });
+                    Game.camera.shake(12, 0.28);
+                    AudioSystem.golden();
+                  },
+                });
+                break;
+              }
             }
           }
         }
@@ -4778,37 +5247,27 @@
         /* Chest kind table — weights are relative and scaled by the player's chest luck.
    Add/tune kinds here without touching the spawn/open logic below. */
         const CHEST_KINDS = {
-          normal: { weight: 60, color: "#8a6a3f", lid: "#5f4527", glow: null },
+          normal: {
+            weight: 65,
+            color: "#8a6a3f",
+            lid: "#5f4527",
+            glow: null,
+            picks: 1,
+          },
           rare: {
-            weight: 20,
+            weight: 27,
             color: "#f5b942",
             lid: "#c98f1e",
             glow: "#ffd76a",
+            picks: 3,
           },
-          golden: {
-            weight: 7,
-            color: "#ffe27a",
-            lid: "#d9a520",
-            glow: "#ffd23f",
-          },
-          cursed: {
-            weight: 7,
-            color: "#5a2a4a",
-            lid: "#33122a",
-            glow: "#c23dff",
-          },
-          chaos: {
-            weight: 4,
+          legendary: {
+            weight: 8,
             color: "#ff7ab8",
             lid: "#7c3aed",
             glow: "#a970ff",
             rainbow: true,
-          },
-          evolution: {
-            weight: 2,
-            color: "#7fd8e8",
-            lid: "#2f8fa3",
-            glow: "#7fd8e8",
+            picks: 5,
           },
         };
         class ChestSystem {
@@ -4894,7 +5353,7 @@
               chest.x,
               chest.y,
               def.glow || "#a970ff",
-              chest.kind === "chaos" ? 40 : 26,
+              chest.kind === "legendary" ? 40 : 26,
               { maxSpeed: 190, minLife: 0.4, maxLife: 0.8 },
             );
             Game.onChestOpened(chest);
@@ -5306,13 +5765,13 @@
               mode === "arcade" ? "Time\u2019s Up!" : "Game Over";
             const rows = [];
             if (mode === "arcade") {
-              rows.push(["BAYATS Hugged", stats.hugs]);
+              rows.push(["bayats Hugged", stats.hugs]);
               rows.push(["Highest Combo", "x" + stats.maxCombo]);
               rows.push(["Level Reached", stats.level]);
               rows.push(["Best Score", SaveSystem.getArcadeBest()]);
             } else {
               rows.push(["Survived", fmtTime(stats.survived) + "s"]);
-              rows.push(["BAYATS Hugged", stats.hugs]);
+              rows.push(["bayats Hugged", stats.hugs]);
               rows.push(["Highest Combo", "x" + stats.maxCombo]);
               rows.push(["Level Reached", stats.level]);
               rows.push(["Best Time", fmtTime(SaveSystem.getFullBest()) + "s"]);
@@ -5335,7 +5794,7 @@
           ctx: null,
           camera: null,
           player: null,
-          BAYATS: null,
+          bayats: null,
           particles: null,
           exp: null,
           upgrades: null,
@@ -5363,10 +5822,14 @@
           lightningBolts: [],
           tempEffects: [],
           evolvedSet: {},
+          obtainedSynergies: {},
           deathFx: [],
           shockwaves: [],
           freezeT: 0,
           enemyProjectiles: [],
+          screenFlashT: 0,
+          screenFlashMax: 0,
+          screenFlashColor: "#fff",
           levelUpQueue: [],
           selectedArenaId: "meadow",
           arena: null,
@@ -5387,8 +5850,47 @@
             this.ctx = this.canvas.getContext("2d");
             this.camera = new Camera();
             this.particles = new ParticleSystem();
+            this.contextLost = false;
+            // On some Android devices, low memory / low battery causes the browser
+            // to reclaim the canvas's GPU-backed context — draw calls then silently
+            // stop applying, so the LAST thing that was on screen (sometimes garbled
+            // or reused from elsewhere) stays frozen there forever. These listeners
+            // let us detect that and recover instead of leaving a corrupted screen.
+            this.canvas.addEventListener(
+              "contextlost",
+              (e) => {
+                e.preventDefault();
+                this.contextLost = true;
+                document
+                  .getElementById("context-lost-banner")
+                  .classList.add("show");
+                console.warn(
+                  "Canvas context lost — pausing rendering until it is restored.",
+                );
+              },
+              false,
+            );
+            this.canvas.addEventListener(
+              "contextrestored",
+              () => {
+                this.ctx = this.canvas.getContext("2d");
+                this.contextLost = false;
+                document
+                  .getElementById("context-lost-banner")
+                  .classList.remove("show");
+                this.resize();
+                console.warn("Canvas context restored — rendering resumed.");
+              },
+              false,
+            );
             this.resize();
             window.addEventListener("resize", () => this.resize());
+            // If the tab comes back from being backgrounded (common right before a
+            // context loss on mobile), force a clean redraw rather than trusting
+            // whatever was left in the buffer.
+            document.addEventListener("visibilitychange", () => {
+              if (!document.hidden && !this.contextLost) this.resize();
+            });
             this.bindInput();
             this.bindUI();
             this.applySettingsToUI();
@@ -5397,7 +5899,16 @@
             requestAnimationFrame(this.loop.bind(this));
           },
           resize() {
-            const dpr = Math.min(window.devicePixelRatio || 1, 2);
+            // Cap resolution harder on touch devices — a huge backing buffer is one
+            // of the biggest contributors to the GPU memory pressure that triggers
+            // context loss on lower-end phones, and the visual difference above ~1.5x
+            // is negligible on a small screen anyway.
+            const isTouch =
+              "ontouchstart" in window || (navigator.maxTouchPoints || 0) > 0;
+            const dpr = Math.min(
+              window.devicePixelRatio || 1,
+              isTouch ? 1.5 : 2,
+            );
             this.canvas.width = innerWidth * dpr;
             this.canvas.height = innerHeight * dpr;
             this.canvas.style.width = innerWidth + "px";
@@ -5623,7 +6134,7 @@
             this.mode = mode;
             UI.resetToolTray();
             this.player = new Player();
-            this.BAYATS = new BAYATManager();
+            this.bayats = new bayatManager();
             this.particles = new ParticleSystem();
             this.exp = new ExperienceSystem();
             this.upgrades = new UpgradeSystem();
@@ -5642,10 +6153,12 @@
             this.lightningBolts = [];
             this.tempEffects = [];
             this.evolvedSet = {};
+            this.obtainedSynergies = {};
             this.deathFx = [];
             this.shockwaves = [];
             this.freezeT = 0;
             this.enemyProjectiles = [];
+            this.screenFlashT = 0;
             this.levelUpQueue = [];
             this.elapsed = 0;
             this.hugs = 0;
@@ -5694,15 +6207,15 @@
 
           onGoldenEvent() {
             AudioSystem.golden();
-            UI.toast("\u2728 GOLDEN BAYAT! GET HIM! \u2728", 2200);
+            UI.toast("\u2728 GOLDEN bayat! GET HIM! \u2728", 2200);
           },
 
-          spawnSnowball(BAYAT, player) {
+          spawnSnowball(bayat, player) {
             AudioSystem.snowThrow();
-            const a = Math.atan2(player.y - BAYAT.y, player.x - BAYAT.x);
+            const a = Math.atan2(player.y - bayat.y, player.x - bayat.x);
             this.enemyProjectiles.push({
-              x: BAYAT.x,
-              y: BAYAT.y,
+              x: bayat.x,
+              y: bayat.y,
               vx: Math.cos(a) * CONFIG.snowball.projectileSpeed,
               vy: Math.sin(a) * CONFIG.snowball.projectileSpeed,
               life: CONFIG.snowball.projectileLife,
@@ -5780,15 +6293,15 @@
             }
           },
 
-          bombExplode(BAYAT) {
-            if (!BAYAT.alive) return;
-            BAYAT.alive = false;
+          bombExplode(bayat) {
+            if (!bayat.alive) return;
+            bayat.alive = false;
             const cfg = CONFIG.bomb;
             AudioSystem.bombExplode();
             this.deathFx.push({
-              x: BAYAT.x,
-              y: BAYAT.y,
-              radius: BAYAT.radius * 1.4,
+              x: bayat.x,
+              y: bayat.y,
+              radius: bayat.radius * 1.4,
               tintColor: "#ff3b1a",
               tintStrength: 0.9,
               danger: true,
@@ -5796,19 +6309,19 @@
               duration: 0.4,
             });
             this.shockwaves.push({
-              x: BAYAT.x,
-              y: BAYAT.y,
+              x: bayat.x,
+              y: bayat.y,
               color: "#ff6a3d",
               t: 0,
               duration: 0.45,
               maxR: cfg.explosionRadius,
             });
-            this.particles.burst(BAYAT.x, BAYAT.y, "#ff8a3d", 44, {
+            this.particles.burst(bayat.x, bayat.y, "#ff8a3d", 44, {
               maxSpeed: 280,
               minLife: 0.35,
               maxLife: 0.7,
             });
-            this.particles.burst(BAYAT.x, BAYAT.y, "#3a2a2a", 20, {
+            this.particles.burst(bayat.x, bayat.y, "#3a2a2a", 20, {
               maxSpeed: 180,
               minLife: 0.4,
               maxLife: 0.8,
@@ -5817,9 +6330,10 @@
             });
             this.camera.shake(13, 0.3);
             this.freezeT = 0.08;
+            this.triggerFlash("#ff6a3d", 0.18);
             if (
               this.player &&
-              dist(this.player.x, this.player.y, BAYAT.x, BAYAT.y) <=
+              dist(this.player.x, this.player.y, bayat.x, bayat.y) <=
                 cfg.explosionRadius
             ) {
               const dealt =
@@ -5837,8 +6351,8 @@
               );
               this.player.hurtFlashT = 0.4;
               const a = Math.atan2(
-                this.player.y - BAYAT.y,
-                this.player.x - BAYAT.x,
+                this.player.y - bayat.y,
+                this.player.x - bayat.x,
               );
               this.player.lungeT = 0.22;
               this.player.lungeVX = Math.cos(a) * cfg.explosionKnockback;
@@ -5850,7 +6364,7 @@
             }
           },
 
-          grantBoost(BAYAT) {
+          grantBoost(bayat) {
             const chosen = choice(BOOST_POOL);
             this.applyTempEffect(
               chosen.icon,
@@ -5862,14 +6376,14 @@
             );
             AudioSystem.boost();
             this.shockwaves.push({
-              x: BAYAT.x,
-              y: BAYAT.y,
+              x: bayat.x,
+              y: bayat.y,
               color: "#39ff9a",
               t: 0,
               duration: 0.35,
               maxR: 65,
             });
-            this.particles.burst(BAYAT.x, BAYAT.y, "#39ff9a", 26, {
+            this.particles.burst(bayat.x, bayat.y, "#39ff9a", 26, {
               maxSpeed: 220,
               minLife: 0.3,
               maxLife: 0.6,
@@ -5885,6 +6399,51 @@
             );
           },
 
+          tryGuardianSave(refillRef) {
+            if (this.player.guardianTotal <= (this.player.guardianUsed || 0))
+              return false;
+            this.player.guardianUsed = (this.player.guardianUsed || 0) + 1;
+            this.timer = refillRef * 0.3;
+            this.freezeT = 0.16;
+            this.shockwaves.push({
+              x: this.player.x,
+              y: this.player.y,
+              color: "#ffd166",
+              t: 0,
+              duration: 0.6,
+              maxR: 150,
+            });
+            this.shockwaves.push({
+              x: this.player.x,
+              y: this.player.y,
+              color: "#ff7ab8",
+              t: 0,
+              duration: 0.75,
+              maxR: 110,
+            });
+            this.particles.burst(this.player.x, this.player.y, "#ffd166", 50, {
+              maxSpeed: 280,
+              minLife: 0.4,
+              maxLife: 0.9,
+            });
+            this.camera.shake(14, 0.35);
+            this.triggerFlash("#ffd166", 0.22);
+            AudioSystem.evolution();
+            UI.toast("\u2728 GUARDIAN HUG! SECOND WIND! \u2728", 2600);
+            this.particles.text(
+              this.player.x,
+              this.player.y - 50,
+              "SAVED!",
+              "#ffd166",
+              22,
+            );
+            return true;
+          },
+          triggerFlash(color, duration) {
+            this.screenFlashT = duration;
+            this.screenFlashMax = duration;
+            this.screenFlashColor = color;
+          },
           checkMilestones() {
             if (this.hugs >= this.nextMilestone) {
               AudioSystem.milestone();
@@ -5893,13 +6452,15 @@
             }
             if (this.combo === 10 || this.combo === 20 || this.combo === 35) {
               AudioSystem.milestone();
+              this.triggerFlash("#ff7ab8", 0.16);
+              UI.comboBanner("x" + this.combo + " COMBO!");
             }
           },
 
-          onHug(BAYAT, isChainHug) {
-            const type = BAYAT.type;
-            BAYAT.alive = false;
-            this.player.triggerHug(BAYAT.x, BAYAT.y);
+          onHug(bayat, isChainHug) {
+            const type = bayat.type;
+            bayat.alive = false;
+            this.player.triggerHug(bayat.x, bayat.y);
             AudioSystem.hug(this.combo);
             if (type.glow) AudioSystem.golden();
             if (type.danger) AudioSystem.danger();
@@ -5928,7 +6489,7 @@
               Math.random() < this.player.megaHugChance;
             const rewardMult =
               (this.player.warmHugsMult || 1) * (isMega ? 2 : 1);
-            if (type.boostType) this.grantBoost(BAYAT);
+            if (type.boostType) this.grantBoost(bayat);
 
             const pcolor = type.danger
               ? "#ff5c72"
@@ -5936,8 +6497,8 @@
                 ? "#ffd76a"
                 : type.color;
             this.particles.burst(
-              BAYAT.x,
-              BAYAT.y,
+              bayat.x,
+              bayat.y,
               pcolor,
               type.glow ? 36 : 16,
               { maxSpeed: type.glow ? 260 : 170, minLife: 0.35, maxLife: 0.75 },
@@ -5946,9 +6507,9 @@
             // pixel death-pop: a short, stepped (non-smooth) scale+fade of the actual
             // sprite, tinted to the type's color — this is the "sprite dies" animation
             this.deathFx.push({
-              x: BAYAT.x,
-              y: BAYAT.y,
-              radius: BAYAT.radius,
+              x: bayat.x,
+              y: bayat.y,
+              radius: bayat.radius,
               tintColor: type.tintColor,
               tintStrength: type.tintStrength,
               danger: type.danger,
@@ -5963,15 +6524,15 @@
               this.camera.shake(9, 0.2);
               this.freezeT = 0.06;
               this.shockwaves.push({
-                x: BAYAT.x,
-                y: BAYAT.y,
+                x: bayat.x,
+                y: bayat.y,
                 color: "#ffd166",
                 t: 0,
                 duration: 0.32,
                 maxR: 70,
               });
               UI.comboBanner("MEGA HUG!");
-              this.particles.burst(BAYAT.x, BAYAT.y, "#ffd166", 24, {
+              this.particles.burst(bayat.x, bayat.y, "#ffd166", 24, {
                 maxSpeed: 220,
                 minLife: 0.3,
                 maxLife: 0.6,
@@ -5981,23 +6542,23 @@
             }
             if (type.glow)
               this.shockwaves.push({
-                x: BAYAT.x,
-                y: BAYAT.y,
+                x: bayat.x,
+                y: bayat.y,
                 color: "#ffd76a",
                 t: 0,
                 duration: 0.4,
                 maxR: 90,
               });
 
-            // Bear Hug: small AoE stun ripple on nearby BAYATS when you hug one
+            // Bear Hug: small AoE stun ripple on nearby bayats when you hug one
             if (this.player.bearHugLevel > 0) {
-              const splash = this.BAYATS.inRadius(
-                BAYAT.x,
-                BAYAT.y,
+              const splash = this.bayats.inRadius(
+                bayat.x,
+                bayat.y,
                 60 + this.player.bearHugLevel * 14,
               );
               for (const s of splash) {
-                if (s !== BAYAT && !s.type.danger)
+                if (s !== bayat && !s.type.danger)
                   s.slowT = Math.max(s.slowT, 0.5);
               }
             }
@@ -6012,16 +6573,16 @@
                 this.player.totalExpMult *
                 rewardMult;
               this.particles.text(
-                BAYAT.x,
-                BAYAT.y - 26,
+                bayat.x,
+                bayat.y - 26,
                 type.danger ? "OUCH!" : isMega ? "MEGA HUG!" : "HUG!",
                 type.danger ? "#ff5c72" : isMega ? "#ffd166" : "#fff",
                 isMega ? 22 : 18,
               );
               if (!type.danger) {
                 this.particles.text(
-                  BAYAT.x,
-                  BAYAT.y - 8,
+                  bayat.x,
+                  bayat.y - 8,
                   "+" + Math.round(expGain) + " EXP",
                   "#a970ff",
                   13,
@@ -6048,15 +6609,15 @@
               }
               this.timer = clamp(this.timer + timeDelta, 0, this.maxStoredTime);
               this.particles.text(
-                BAYAT.x,
-                BAYAT.y - 26,
+                bayat.x,
+                bayat.y - 26,
                 type.danger ? "OUCH!" : isMega ? "MEGA HUG!" : "HUG!",
                 type.danger ? "#ff5c72" : isMega ? "#ffd166" : "#fff",
                 isMega ? 22 : 18,
               );
               this.particles.text(
-                BAYAT.x,
-                BAYAT.y - 8,
+                bayat.x,
+                bayat.y - 8,
                 (timeDelta >= 0 ? "+" : "") + timeDelta.toFixed(2) + "s",
                 timeDelta >= 0 ? "#6fe3a3" : "#ff5c72",
                 13,
@@ -6075,21 +6636,21 @@
 
             if (!type.danger) this.checkMilestones();
 
-            // Double Hug: chance to also catch a second nearby BAYAT
+            // Double Hug: chance to also catch a second nearby bayat
             if (
               !isChainHug &&
               !type.danger &&
               this.player.doubleHugChance > 0 &&
               Math.random() < this.player.doubleHugChance
             ) {
-              const second = this.BAYATS.nearest(
-                BAYAT.x,
-                BAYAT.y,
+              const second = this.bayats.nearest(
+                bayat.x,
+                bayat.y,
                 (n) =>
-                  n !== BAYAT &&
+                  n !== bayat &&
                   n.alive &&
                   !n.type.danger &&
-                  dist(BAYAT.x, BAYAT.y, n.x, n.y) <
+                  dist(bayat.x, bayat.y, n.x, n.y) <
                     this.player.hugRadius * 2.2,
               );
               if (second) {
@@ -6234,149 +6795,109 @@
             });
           },
           onChestOpened(chest) {
-            const expGain = 22 * this.player.totalExpMult;
-            const timeBonus =
-              chest.kind === "golden" ? 6.5 : chest.rare ? 4.5 : 2.2;
+            const kindDef = CHEST_KINDS[chest.kind] || CHEST_KINDS.normal;
+            let picks = kindDef.picks || 1;
+            const grants = []; // {name, lvl|null, isSynergy}
 
-            if (chest.kind === "chaos") {
-              this.state = "levelup";
-              const rewards = rollChaosRewards(5);
-              UI.showChaosModal(rewards, (reward) => {
-                applyChaosReward(reward, this.player);
-                UI.hideUpgradeModal();
-                this.particles.text(
-                  this.player.x,
-                  this.player.y - 40,
-                  reward.name + "!",
-                  "#ffd76a",
-                  16,
-                );
-                this.checkEvolutions();
-                this.state = "playing";
-                this.lastFrame = performance.now();
-              });
-              return;
+            // A synergy is granted at most once per run, and consumes one of the
+            // chest's picks — the rest of the picks (if any) still land as normal
+            // random upgrades. See SYNERGIES below for how combos are defined.
+            const synergy = SYNERGIES.find(
+              (s) =>
+                !this.obtainedSynergies[s.id] &&
+                s.parts.every((id) => this.upgrades.levelOf(id) > 0),
+            );
+            if (synergy && picks > 0) {
+              this.grantSynergy(synergy);
+              grants.push(synergy.name + " (NEW!)");
+              picks--;
             }
 
-            if (chest.kind === "evolution") {
-              const need = EVOLUTIONS.find(
-                (evo) =>
-                  !this.evolvedSet[evo.id] &&
-                  evo.parts.some(
-                    (p) => this.upgrades.levelOf(p.id) < p.minLevel,
-                  ),
+            for (let i = 0; i < picks; i++) {
+              const pool = STAT_UPGRADES.concat(TOOL_DEFS).filter(
+                (d) => !this.upgrades.isMaxed(d),
               );
-              if (need) {
-                const part = need.parts.find(
-                  (p) => this.upgrades.levelOf(p.id) < p.minLevel,
-                );
-                const def =
-                  STAT_UPGRADES.find((d) => d.id === part.id) ||
-                  TOOL_DEFS.find((d) => d.id === part.id);
-                if (def) {
-                  const lvl = this.upgrades.apply(def, this.player);
-                  UI.toast(
-                    "\u2726 Evolution component: " + def.name + " Lv" + lvl,
-                    2200,
-                  );
-                  this.particles.text(
-                    this.player.x,
-                    this.player.y - 40,
-                    def.name + " Lv" + lvl,
-                    "#7fd8e8",
-                    16,
-                  );
-                  this.checkEvolutions();
-                  this.grantFlatReward(chest, expGain * 0.5, timeBonus * 0.5);
-                  return;
-                }
-              }
-              this.grantFlatReward(chest, expGain, timeBonus);
-              return;
+              if (!pool.length) break;
+              const pick = choice(pool);
+              const lvl = this.upgrades.apply(pick, this.player);
+              grants.push(pick.name + " Lv" + lvl);
+              this.particles.text(
+                this.player.x,
+                this.player.y - 40 - i * 16,
+                pick.name + " Lv" + lvl,
+                kindDef.glow || "#a970ff",
+                15,
+              );
+              this.checkEvolutions();
             }
 
-            if (chest.kind === "golden") {
-              const choices = this.upgrades.rollChoices(1, true);
-              if (choices.length > 0) {
-                const lvl = this.upgrades.apply(choices[0], this.player);
-                this.checkEvolutions();
-                this.particles.text(
-                  this.player.x,
-                  this.player.y - 40,
-                  choices[0].name + " Lv" + lvl,
-                  "#ffd76a",
-                  16,
-                );
-              }
-              UI.toast("\u2728 GOLDEN CHEST! \u2728", 1800);
-              this.grantFlatReward(chest, expGain * 1.4, timeBonus * 1.3);
-              return;
-            }
-
-            if (chest.kind === "cursed") {
-              const choices = this.upgrades.rollChoices(2, true);
-              if (choices.length > 0) {
-                this.state = "levelup";
-                UI.showUpgradeModal(
-                  "CURSED CHEST",
-                  "A powerful reward... at a cost",
-                  choices,
-                  (def) => {
-                    const lvl = this.upgrades.apply(def, this.player);
-                    UI.hideUpgradeModal();
-                    this.particles.text(
-                      this.player.x,
-                      this.player.y - 40,
-                      def.name + " Lv" + lvl,
-                      "#ffd76a",
-                      16,
-                    );
-                    this.checkEvolutions();
-                    this.applyCurse();
-                    this.state = "playing";
-                    this.lastFrame = performance.now();
-                  },
-                );
-                return;
-              }
-              this.applyCurse();
-              this.grantFlatReward(chest, expGain * 1.3, timeBonus * 1.2);
-              return;
-            }
-
-            if (this.mode === "full" && chest.kind === "rare") {
-              const choices = this.upgrades.rollChoices(2, true);
-              if (choices.length > 0) {
-                this.state = "levelup";
-                UI.showUpgradeModal(
-                  "RARE CHEST!",
-                  "Pick a bonus",
-                  choices,
-                  (def) => {
-                    const lvl = this.upgrades.apply(def, this.player);
-                    UI.hideUpgradeModal();
-                    this.particles.text(
-                      this.player.x,
-                      this.player.y - 40,
-                      def.name + " Lv" + lvl,
-                      "#ffd76a",
-                      16,
-                    );
-                    this.checkEvolutions();
-                    this.state = "playing";
-                    this.lastFrame = performance.now();
-                  },
-                );
-                return;
-              }
-            }
-
+            // A small guaranteed bonus scales with tier so chests stay worth opening
+            // even on an unlucky roll, without being the headline reward.
+            const bonusScale = kindDef.picks || 1;
+            const expGain = (6 + bonusScale * 4) * this.player.totalExpMult;
+            const timeBonus = 0.9 * bonusScale;
             this.grantFlatReward(chest, expGain, timeBonus);
+
+            if (grants.length) {
+              const label =
+                chest.kind === "legendary"
+                  ? "\u2726 LEGENDARY CHEST! \u2726"
+                  : chest.kind === "rare"
+                    ? "\u2726 RARE CHEST! \u2726"
+                    : "CHEST OPENED";
+              UI.toast(
+                label + "  " + grants.join(", "),
+                chest.kind === "normal" ? 1600 : 2400,
+              );
+            }
+          },
+          grantSynergy(synergy) {
+            this.obtainedSynergies[synergy.id] = true;
+            const def = synergy.resultTool;
+            this.tools.equip(def, 1);
+            this.upgrades.levels[def.id] = 1; // marks it "owned" so it can never appear in a normal upgrade pool
+            if (def.onGrant) def.onGrant(this.player);
+            AudioSystem.evolution();
+            this.freezeT = 0.16;
+            this.triggerFlash("#a970ff", 0.22);
+            this.shockwaves.push({
+              x: this.player.x,
+              y: this.player.y,
+              color: "#a970ff",
+              t: 0,
+              duration: 0.55,
+              maxR: 130,
+            });
+            this.shockwaves.push({
+              x: this.player.x,
+              y: this.player.y,
+              color: "#ffd76a",
+              t: 0,
+              duration: 0.4,
+              maxR: 90,
+            });
+            this.particles.burst(this.player.x, this.player.y, "#a970ff", 44, {
+              maxSpeed: 260,
+              minLife: 0.4,
+              maxLife: 0.85,
+            });
+            this.camera.shake(11, 0.3);
+            UI.toast(
+              "\u2666 SYNERGY: " + synergy.name.toUpperCase() + " \u2666",
+              3200,
+            );
+            this.particles.text(
+              this.player.x,
+              this.player.y - 56,
+              synergy.name + "!",
+              "#a970ff",
+              19,
+            );
           },
 
           checkHugs() {
             const hr = this.player.hugRadius;
-            for (const n of this.BAYATS.list) {
+            for (const n of this.bayats.list) {
               if (!n.alive) continue;
               const rr = hr + n.radius * 0.6;
               if (dist2(this.player.x, this.player.y, n.x, n.y) <= rr * rr) {
@@ -6388,7 +6909,7 @@
           applyStickyArms(dt) {
             if (this.player.stickyArmsLevel <= 0) return;
             const range = this.player.hugRadius * 1.5;
-            for (const n of this.BAYATS.list) {
+            for (const n of this.bayats.list) {
               if (!n.alive || n.type.danger) continue;
               if (
                 dist2(this.player.x, this.player.y, n.x, n.y) <
@@ -6438,7 +6959,7 @@
                 continue;
               }
               if (z.slow) {
-                const targets = this.BAYATS.inRadius(z.x, z.y, z.r);
+                const targets = this.bayats.inRadius(z.x, z.y, z.r);
                 for (const n of targets) {
                   n.slowT = Math.max(n.slowT, 0.25);
                 }
@@ -6571,6 +7092,7 @@
               this.updateDeathFx(dt);
               this.updateShockwaves(dt);
               this.updateEnemyProjectiles(dt);
+              if (this.screenFlashT > 0) this.screenFlashT -= dt;
               return;
             }
 
@@ -6579,9 +7101,11 @@
             if (this.mode === "arcade") {
               this.timer -= dt;
               if (this.timer <= 0) {
-                this.timer = 0;
-                this.endRun();
-                return;
+                if (!this.tryGuardianSave(CONFIG.arcade.duration)) {
+                  this.timer = 0;
+                  this.endRun();
+                  return;
+                }
               }
             } else {
               this.maxStoredTime =
@@ -6593,22 +7117,24 @@
               this.timer = Math.min(this.timer, this.maxStoredTime);
               this.timer -= dt;
               if (this.timer <= 0) {
-                this.timer = 0;
-                this.endRun();
-                return;
+                if (!this.tryGuardianSave(this.maxStoredTime)) {
+                  this.timer = 0;
+                  this.endRun();
+                  return;
+                }
               }
             }
 
             this.player.update(dt, this.input);
             this.camera.follow(this.player.x, this.player.y, dt);
-            this.BAYATS.update(
+            this.bayats.update(
               dt,
               this.elapsed,
               this.player,
               this.player.blackHoleLevel,
             );
             if (this.mode === "full")
-              this.tools.update(dt, this.player, this.BAYATS);
+              this.tools.update(dt, this.player, this.bayats);
             this.chests.update(
               dt,
               this.elapsed,
@@ -6658,6 +7184,7 @@
             this.updateDeathFx(dt);
             this.updateShockwaves(dt);
             this.updateEnemyProjectiles(dt);
+            if (this.screenFlashT > 0) this.screenFlashT -= dt;
 
             UI.updateHud({
               timer: this.timer,
@@ -6843,7 +7370,7 @@
                 ctx.stroke();
                 ctx.restore();
               } else if (p.kind === "missile") {
-                const target = this.BAYATS.list.find(
+                const target = this.bayats.list.find(
                   (n) => n.id === p.targetId && n.alive,
                 );
                 const tx = target ? target.x : p.x,
@@ -6864,7 +7391,7 @@
               }
             }
 
-            // enemy projectiles (Snowball BAYAT throws)
+            // enemy projectiles (Snowball bayat throws)
             for (const p of this.enemyProjectiles) {
               const sx = p.x - cam.x,
                 sy = p.y - cam.y;
@@ -6886,7 +7413,7 @@
             }
 
             if (this.chests) this.chests.draw(ctx, cam);
-            if (this.BAYATS) this.BAYATS.draw(ctx, cam);
+            if (this.bayats) this.bayats.draw(ctx, cam);
 
             // pixel death-pop: 3 discrete stepped frames of the tinted sprite scaling+fading out
             for (const fx of this.deathFx) {
@@ -6903,18 +7430,18 @@
               ctx.save();
               ctx.translate(sx, sy);
               ctx.globalAlpha = fr.alpha;
-              if (Sprites.BAYATLoaded) {
+              if (Sprites.bayatLoaded) {
                 const size = fx.radius * 2.9 * fr.scale;
                 ctx.imageSmoothingEnabled = false;
                 const sprite = fx.danger
-                  ? SpriteTint.getTinted("BAYAT", "#ff2d4d", 0.85)
+                  ? SpriteTint.getTinted("bayat", "#ff2d4d", 0.85)
                   : SpriteTint.getTinted(
-                      "BAYAT",
+                      "bayat",
                       fx.tintColor,
                       fx.tintStrength,
                     );
                 ctx.drawImage(
-                  sprite || Sprites.BAYAT,
+                  sprite || Sprites.bayat,
                   -size / 2,
                   -size / 2,
                   size,
@@ -6966,6 +7493,8 @@
               for (const id in this.tools.active) {
                 const t = this.tools.active[id];
                 if (t.def.kind === "orbit" && t.positions) {
+                  const isBestBuds = t.def.id === "bestbuds";
+                  const glowColor = isBestBuds ? "#ff7ab8" : "#ffd76a";
                   t.positions.forEach((pos, idx) => {
                     const bobPhase = performance.now() / 260 + idx * 1.9;
                     const bob =
@@ -6975,18 +7504,35 @@
                       sy = pos.y - cam.y + bob;
                     ctx.save();
                     ctx.translate(sx, sy);
-                    ctx.rotate(Math.sin(bobPhase * 0.7) * 0.25);
+                    ctx.rotate(Math.sin(bobPhase * 0.7) * 0.22);
                     ctx.scale(pulse, pulse);
-                    ctx.fillStyle = "#ffd76a";
-                    ctx.shadowColor = "#ffd76a";
-                    ctx.shadowBlur = pulse > 1 ? 14 : 8;
-                    ctx.beginPath();
-                    ctx.arc(0, 0, 8, 0, TAU);
-                    ctx.fill();
+                    ctx.shadowColor = glowColor;
+                    ctx.shadowBlur = pulse > 1 ? 16 : 9;
+                    if (Sprites.buddyLoaded) {
+                      // pixel-art companion sprite — tinted pink for the Best Buds synergy
+                      // so the two orbit tools read as visually distinct, not just recolored dots
+                      const sprite = isBestBuds
+                        ? SpriteTint.getTinted("buddy", "#ff5fa8", 0.5) ||
+                          Sprites.buddy
+                        : Sprites.buddy;
+                      ctx.imageSmoothingEnabled = false;
+                      const size = 22;
+                      ctx.drawImage(sprite, -size / 2, -size / 2, size, size);
+                    } else {
+                      // procedural fallback if buddy.png fails to load — still pixel-art, never an emoji
+                      ctx.fillStyle = glowColor;
+                      ctx.beginPath();
+                      ctx.arc(0, 0, 8, 0, TAU);
+                      ctx.fill();
+                      ctx.fillStyle = "#1c1430";
+                      ctx.beginPath();
+                      ctx.arc(-2.5, -1, 1.3, 0, TAU);
+                      ctx.fill();
+                      ctx.beginPath();
+                      ctx.arc(2.5, -1, 1.3, 0, TAU);
+                      ctx.fill();
+                    }
                     ctx.shadowBlur = 0;
-                    ctx.font = "11px sans-serif";
-                    ctx.textAlign = "center";
-                    ctx.fillText("\uD83E\uDDF8", 0, 4);
                     ctx.restore();
                   });
                 }
@@ -7003,10 +7549,28 @@
             }
             if (this.particles) this.particles.draw(ctx, cam);
             ctx.restore();
+
+            // full-screen flash for big moments (combo milestones, explosions, saves) —
+            // drawn after restore() so it sits in plain screen space, unaffected by shake
+            if (this.screenFlashT > 0) {
+              const a =
+                clamp(this.screenFlashT / this.screenFlashMax, 0, 1) * 0.35;
+              ctx.fillStyle = this.screenFlashColor;
+              ctx.globalAlpha = a;
+              ctx.fillRect(0, 0, cam.w, cam.h);
+              ctx.globalAlpha = 1;
+            }
           },
 
           loop(ts) {
             try {
+              if (this.contextLost) {
+                // Don't touch the lost context at all — any draw call on it is a
+                // silent no-op that can't refresh what's on screen, so calling them
+                // repeatedly just wastes the frame. We just wait for 'contextrestored'.
+                requestAnimationFrame(this.loop.bind(this));
+                return;
+              }
               const dt = Math.min(0.05, (ts - this.lastFrame) / 1000 || 0);
               this.lastFrame = ts;
               if (this.state === "playing") this.update(dt);
