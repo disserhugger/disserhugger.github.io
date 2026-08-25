@@ -135,7 +135,22 @@ const Multiplayer = {
     this.peers = {};
     this._actions = {};
     try {
-      this.room = this._joinRoomFn({ appId: MP_APP_ID }, code);
+      // Trystero's nostr strategy only connects each client to `redundancy`
+      // relays picked randomly out of its ~45-relay default pool — the
+      // default is just 5. Two independent 5-of-45 picks share ZERO
+      // relays roughly HALF the time (birthday-paradox-style math), and
+      // with no shared relay two peers can never find each other's
+      // signaling messages — from the outside this looks exactly like
+      // "joining silently creates an empty room instead" (confirmed: a
+      // real host + a real joiner, both genuinely online, just never saw
+      // each other). Raising redundancy makes overlap near-certain at the
+      // cost of a few more short-lived WebSocket connections, which is a
+      // trivial cost for a casual browser game. See CLAUDE.md
+      // "Multiplayer" bug history before lowering this back down.
+      this.room = this._joinRoomFn(
+        { appId: MP_APP_ID, relayConfig: { redundancy: 20 } },
+        code,
+      );
     } catch (e) {
       console.error("[Multiplayer] joinRoom() threw:", e);
       this.room = null;
