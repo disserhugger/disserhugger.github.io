@@ -14,6 +14,15 @@ const UI = {
       "screen-pause",
       "screen-inventory",
       "screen-arena",
+      "screen-mp-profile",
+      "screen-mp-hostjoin",
+      "screen-mp-lobby",
+      "mp-username-input",
+      "mp-color-grid",
+      "mp-join-code-input",
+      "mp-room-code",
+      "mp-peer-list",
+      "mp-start-btn",
       "hud",
       "hud-timer",
       "hud-secondary",
@@ -56,6 +65,9 @@ const UI = {
     "screen-pause",
     "screen-inventory",
     "screen-arena",
+    "screen-mp-profile",
+    "screen-mp-hostjoin",
+    "screen-mp-lobby",
   ],
   showScreen(id) {
     this.ALL_SCREENS.forEach((s) => {
@@ -253,6 +265,54 @@ const UI = {
             : `<div class="arena-locked-text">\uD83D\uDD12 Unlock by reaching ${a.unlock.value} lifetime hugs (you have ${lifetime})</div>`
         }
       </div>`,
+      );
+    }
+  },
+  // ---- Co-op multiplayer screens ----
+  _mpSelectedColor: null,
+  renderMpProfileForm() {
+    const existing = SaveSystem.getMpProfile();
+    this.els["mp-username-input"].value = existing ? existing.name : "";
+    this._mpSelectedColor = existing ? existing.color : MP_COLORS[0].hex;
+    const grid = this.els["mp-color-grid"];
+    grid.innerHTML = "";
+    for (const c of MP_COLORS) {
+      const selected = c.hex === this._mpSelectedColor;
+      grid.insertAdjacentHTML(
+        "beforeend",
+        `<div class="mp-color-swatch${selected ? " selected" : ""}"
+              data-mp-color="${c.hex}" style="background:${c.hex}"
+              title="${c.name}"></div>`,
+      );
+    }
+  },
+  selectMpColor(hex) {
+    this._mpSelectedColor = hex;
+    const grid = this.els["mp-color-grid"];
+    grid.querySelectorAll(".mp-color-swatch").forEach((el) => {
+      el.classList.toggle("selected", el.dataset.mpColor === hex);
+    });
+  },
+  // Renders the live peer list in the lobby placeholder screen. `peers` is
+  // Multiplayer.peers (peerId -> {name,color}); `selfProfile` is this
+  // client's own {name,color} so the local player shows up too, since
+  // Trystero only tells you about OTHER peers, not yourself.
+  renderMpPeerList(peers, selfProfile, isHost) {
+    const list = this.els["mp-peer-list"];
+    if (!list) return;
+    list.innerHTML = "";
+    const rows = [{ name: selfProfile.name, color: selfProfile.color, self: true }];
+    for (const id in peers) {
+      rows.push({ name: peers[id].name, color: peers[id].color, self: false });
+    }
+    for (const r of rows) {
+      const safeColor = /^#[0-9a-fA-F]{3,8}$/.test(r.color) ? r.color : "#888";
+      list.insertAdjacentHTML(
+        "beforeend",
+        `<div class="mp-player-row">
+          <div class="mp-player-swatch" style="background:${safeColor}"></div>
+          <div class="mp-player-name">${escapeHtml(r.name || "?")}${r.self ? " (you)" : ""}${r.self && isHost ? " ★" : ""}</div>
+        </div>`,
       );
     }
   },

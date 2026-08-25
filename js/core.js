@@ -85,3 +85,16 @@ function weightedPick(items) {
   }
   return items[items.length - 1].item;
 }
+// Escapes text that came from another peer (username, chat, etc.) before
+// it's dropped into innerHTML — in multiplayer this is untrusted input
+// from someone else's browser over a WebRTC data channel, not just a
+// display-formatting nicety.
+function escapeHtml(str) {
+  return String(str).replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        c
+      ],
+  );
+}

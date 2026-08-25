@@ -47,6 +47,14 @@ const Game = {
   levelUpQueue: [],
   selectedArenaId: "meadow",
   arena: null,
+  // ---- Co-op multiplayer (see CLAUDE.md "Multiplayer" section) ----
+  mpProfile: null, // {name, color} for THIS session, loaded from/saved to SaveSystem
+  mpInLobby: false,
+  coop: false, // true for the whole duration of a networked run — orthogonal to `mode` (coop always uses "full" semantics)
+  mpPeers: {}, // peerId -> {name, color, x, y, targetX, targetY, facing, moving, downed, animT, _reviveSent}
+  mpNetTimer: 0, // accumulator: local playerState broadcast tick
+  mpBayatNetTimer: 0, // accumulator: host-only Bayat snapshot broadcast tick
+  mpPendingClaims: {}, // bayatId -> true while awaiting the host's hugResult (non-host only)
   joystick: {
     active: false,
     baseX: 0,
@@ -262,6 +270,12 @@ const Game = {
             UI.updateMenuStats();
             break;
           case "retry":
+            // Co-op has no "restart together" flow (out of scope — see
+            // CLAUDE.md "Multiplayer" known gaps) — Play Again after a
+            // co-op run just leaves the room and retries solo, rather
+            // than silently half-restarting a session other peers still
+            // think is live.
+            if (this.coop) this.mpEndCoopSession();
             this.startGame(this.mode);
             break;
           case "pause":
@@ -287,6 +301,31 @@ const Game = {
             UI.renderArenaSelect();
             UI.showScreen("screen-arena");
             break;
+          case "show-coop":
+            this.mpEnterFlow();
+            break;
+          case "mp-save-profile":
+            this.mpSaveProfile();
+            break;
+          case "mp-edit-profile":
+            UI.renderMpProfileForm();
+            UI.showScreen("screen-mp-profile");
+            break;
+          case "mp-host":
+            this.mpStartHost();
+            break;
+          case "mp-join":
+            this.mpStartJoin();
+            break;
+          case "mp-copy-code":
+            this.mpCopyCode();
+            break;
+          case "mp-leave":
+            this.mpLeaveLobby();
+            break;
+          case "mp-start":
+            this.mpStartRun();
+            break;
         }
       }
       const invTab = e.target.closest("[data-invtab]");
@@ -303,6 +342,11 @@ const Game = {
           1600,
         );
         UI.renderArenaSelect();
+      }
+      const colorSwatch = e.target.closest("[data-mp-color]");
+      if (colorSwatch) {
+        AudioSystem.click();
+        UI.selectMpColor(colorSwatch.dataset.mpColor);
       }
     });
     const bindToggle = (id, key) => {
@@ -341,6 +385,448 @@ const Game = {
     document
       .getElementById("set-touch")
       .classList.toggle("on", this.settings.touchControls);
+  },
+
+  /* =========================================================
+     CO-OP MULTIPLAYER (Trystero) — see CLAUDE.md "Multiplayer" section
+     for the full protocol writeup. Everything here just drives the UI
+     flow and calls into window.Multiplayer (js/multiplayer.js), the ES
+     module that actually talks to Trystero. That module is guaranteed to
+     be loaded by the time bindUI() can fire (see its own header comment
+     for why), but on file:// (or fully offline) the module script itself
+     never executes, so `Multiplayer` is undefined — every entry point
+     here checks for that first and fails soft with a toast instead of
+     throwing, exactly like the rest of the game degrades around missing
+     localStorage/canvas-context/etc.
+     ========================================================= */
+  mpRoomCharset: "ABCDEFGHJKLMNPQRSTUVWXYZ23456789", // no 0/O/1/I — easier to read aloud
+  mpGenerateRoomCode() {
+    let code = "";
+    for (let i = 0; i < 5; i++) {
+      code += this.mpRoomCharset[Math.floor(Math.random() * this.mpRoomCharset.length)];
+    }
+    return code;
+  },
+  mpAvailable() {
+    return typeof Multiplayer !== "undefined";
+  },
+  mpEnterFlow() {
+    if (!this.mpAvailable()) {
+      UI.toast(
+        "Co-op needs the game running from a web server (http/https) — it won't work opened as a local file.",
+        3200,
+      );
+      return;
+    }
+    const existing = SaveSystem.getMpProfile();
+    if (existing) {
+      this.mpProfile = existing;
+      UI.showScreen("screen-mp-hostjoin");
+    } else {
+      UI.renderMpProfileForm();
+      UI.showScreen("screen-mp-profile");
+    }
+  },
+  mpSaveProfile() {
+    const nameRaw = (UI.els["mp-username-input"].value || "").trim();
+    const name = nameRaw.slice(0, 16) || "Player";
+    const color = UI._mpSelectedColor || MP_COLORS[0].hex;
+    const profile = { name, color };
+    SaveSystem.setMpProfile(profile);
+    this.mpProfile = profile;
+    UI.showScreen("screen-mp-hostjoin");
+  },
+  // Wires Multiplayer's callbacks to keep the lobby list live, and logs
+  // join/leave the way the initial two-tabs smoke test wants. Safe to
+  // call multiple times (host/join both call this after connecting).
+  mpBindRoomCallbacks() {
+    Multiplayer.onPeerJoin = (peerId) => {
+      console.log("[Co-op] peer joined:", peerId);
+      this.mpRefreshLobby();
+    };
+    Multiplayer.onPeerLeave = (peerId) => {
+      console.log("[Co-op] peer left:", peerId);
+      this.mpRefreshLobby();
+      if (this.mpInLobby) {
+        UI.toast("A player left the lobby.", 1800);
+      }
+    };
+    Multiplayer.onPeerProfile = (peerId, profile) => {
+      console.log("[Co-op] peer profile:", peerId, profile);
+      this.mpRefreshLobby();
+    };
+    // ---- gameplay actions (see CLAUDE.md "Multiplayer" protocol table).
+    // Registered here (lobby-join time) rather than at run-start so they're
+    // ready the instant a "start" broadcast arrives — they're all no-ops
+    // until this.coop actually flips true. ----
+    Multiplayer.on("start", (data) => this.mpOnStartReceived(data));
+    Multiplayer.on("playerState", (data, peerId) =>
+      this.mpOnPlayerState(data, peerId),
+    );
+    Multiplayer.on("bayatSnapshot", (data) => this.mpOnBayatSnapshot(data));
+    Multiplayer.on("hugClaim", (data, peerId) =>
+      this.mpOnHugClaim(data, peerId),
+    );
+    Multiplayer.on("hugResult", (data) => this.mpOnHugResult(data));
+    Multiplayer.on("downedState", (data, peerId) =>
+      this.mpOnDownedState(data, peerId),
+    );
+    Multiplayer.on("revive", (data, peerId) => this.mpOnRevive(data, peerId));
+  },
+  mpRefreshLobby() {
+    if (!this.mpInLobby || !this.mpProfile) return;
+    UI.renderMpPeerList(Multiplayer.peers, this.mpProfile, Multiplayer.isHost);
+    UI.els["mp-start-btn"].classList.toggle("hidden", !Multiplayer.isHost);
+  },
+  async mpStartHost() {
+    if (!this.mpProfile) {
+      UI.toast("Set a name and color first.", 2000);
+      return;
+    }
+    const code = this.mpGenerateRoomCode();
+    try {
+      await Multiplayer.host(code, this.mpProfile);
+    } catch (e) {
+      console.error("[Co-op] host() failed:", e);
+      UI.toast(
+        "Couldn't start a co-op room — check your internet connection and try again.",
+        3200,
+      );
+      return;
+    }
+    this.mpBindRoomCallbacks();
+    this.mpInLobby = true;
+    UI.els["mp-room-code"].textContent = code;
+    this.mpRefreshLobby();
+    UI.showScreen("screen-mp-lobby");
+  },
+  async mpStartJoin() {
+    if (!this.mpProfile) {
+      UI.toast("Set a name and color first.", 2000);
+      return;
+    }
+    const code = (UI.els["mp-join-code-input"].value || "")
+      .trim()
+      .toUpperCase();
+    if (code.length < 4) {
+      UI.toast("Enter the room code your friend shared.", 2200);
+      return;
+    }
+    try {
+      await Multiplayer.join(code, this.mpProfile);
+    } catch (e) {
+      console.error("[Co-op] join() failed:", e);
+      UI.toast(
+        "Couldn't join that room — check the code and your internet connection.",
+        3200,
+      );
+      return;
+    }
+    this.mpBindRoomCallbacks();
+    this.mpInLobby = true;
+    UI.els["mp-room-code"].textContent = code;
+    this.mpRefreshLobby();
+    UI.showScreen("screen-mp-lobby");
+  },
+  mpCopyCode() {
+    const code = (Multiplayer && Multiplayer.roomCode) || "";
+    if (!code) return;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard
+          .writeText(code)
+          .then(() => UI.toast("Room code copied!", 1600))
+          .catch(() => UI.toast("Couldn't copy — code is " + code, 2200));
+      } else {
+        UI.toast("Couldn't copy — code is " + code, 2200);
+      }
+    } catch (e) {
+      UI.toast("Couldn't copy — code is " + code, 2200);
+    }
+  },
+  mpLeaveLobby() {
+    try {
+      if (this.mpAvailable()) Multiplayer.leave();
+    } catch (e) {
+      console.warn("[Co-op] error leaving room (ignoring):", e);
+    }
+    this.mpInLobby = false;
+    UI.showScreen("screen-mp-hostjoin");
+  },
+  // Host clicks "Start Run": broadcasts the chosen arena to everyone,
+  // then begins locally. Everyone (host included) launches through the
+  // same mpBeginCoopRun() so there's exactly one code path for "how a
+  // co-op run actually starts."
+  mpStartRun() {
+    if (!Multiplayer.isHost) return;
+    const arenaId = this.selectedArenaId;
+    Multiplayer.send("start", { arenaId });
+    this.mpBeginCoopRun(arenaId);
+  },
+  mpOnStartReceived(data) {
+    if (Multiplayer.isHost || !this.mpInLobby) return;
+    this.mpBeginCoopRun(data.arenaId);
+  },
+  mpBeginCoopRun(arenaId) {
+    this.mpInLobby = false;
+    this.coop = true;
+    if (ARENAS.some((a) => a.id === arenaId)) this.selectedArenaId = arenaId;
+    this.mpNetTimer = 0;
+    this.mpBayatNetTimer = 0;
+    this.mpPendingClaims = {};
+    // Seed puppets for everyone already in the room from their known
+    // profile; position/facing/moving fill in on their first playerState
+    // broadcast (well under 100ms away) — CONFIG.arena.width/2, height/2
+    // is also exactly where a fresh Player spawns, so this isn't a guess,
+    // it's the real shared spawn point.
+    this.mpPeers = {};
+    for (const id in Multiplayer.peers) {
+      const prof = Multiplayer.peers[id];
+      this.mpPeers[id] = {
+        name: prof.name,
+        color: prof.color,
+        x: CONFIG.arena.width / 2,
+        y: CONFIG.arena.height / 2,
+        targetX: null,
+        targetY: null,
+        facing: 1,
+        moving: false,
+        downed: false,
+        animT: 0,
+        _reviveSent: false,
+      };
+    }
+    this.startGame("full");
+  },
+  // ---- per-frame networking: called from update(dt) only while
+  // this.coop is true. Position/Bayat-snapshot broadcast tick rates are
+  // deliberately low (10-15/sec-ish) — see CLAUDE.md "Multiplayer"
+  // protocol table for why that's plenty for a casual co-op game. ----
+  mpUpdateNetworking(dt) {
+    this.mpNetTimer -= dt;
+    if (this.mpNetTimer <= 0) {
+      this.mpNetTimer = 1 / 12;
+      Multiplayer.send("playerState", {
+        x: Math.round(this.player.x),
+        y: Math.round(this.player.y),
+        facing: this.player.facing,
+        moving: this.player.moving,
+      });
+    }
+    if (Multiplayer.isHost) {
+      this.mpBayatNetTimer -= dt;
+      if (this.mpBayatNetTimer <= 0) {
+        this.mpBayatNetTimer = 1 / 8;
+        const list = this.bayats.list
+          .filter((n) => n.alive)
+          .map((n) => ({
+            id: n.id,
+            t: n.type.key,
+            x: Math.round(n.x),
+            y: Math.round(n.y),
+          }));
+        Multiplayer.send("bayatSnapshot", {
+          list,
+          difficulty: this.bayats.difficulty(this.elapsed),
+        });
+      }
+    }
+    for (const id in this.mpPeers) {
+      const p = this.mpPeers[id];
+      if (p.targetX == null) continue; // no network sample yet — stay at spawn
+      const t = Math.min(1, dt * 10);
+      p.x = lerp(p.x, p.targetX, t);
+      p.y = lerp(p.y, p.targetY, t);
+      p.animT += dt * (p.moving ? 8 : 2.4);
+    }
+    this.mpUpdateReviveCheck();
+  },
+  mpOnPlayerState(data, peerId) {
+    if (!this.coop) return;
+    let p = this.mpPeers[peerId];
+    if (!p) {
+      const prof = Multiplayer.peers[peerId] || { name: "Player", color: "#888" };
+      p = this.mpPeers[peerId] = {
+        name: prof.name,
+        color: prof.color,
+        x: data.x,
+        y: data.y,
+        targetX: data.x,
+        targetY: data.y,
+        facing: 1,
+        moving: false,
+        downed: false,
+        animT: 0,
+        _reviveSent: false,
+      };
+    }
+    p.targetX = data.x;
+    p.targetY = data.y;
+    p.facing = data.facing;
+    p.moving = data.moving;
+  },
+  mpOnBayatSnapshot(data) {
+    if (!this.coop || Multiplayer.isHost) return;
+    this.bayats.applySnapshot(data.list, data.difficulty);
+  },
+  // Host-only: the arbiter for "who gets this Bayat." Whoever's claim
+  // arrives first while it's still alive wins; everyone else's claim for
+  // the same id loses (bayat.alive is already false by then).
+  mpOnHugClaim(data, peerId) {
+    if (!this.coop || !Multiplayer.isHost) return;
+    const bayat = this.bayats.list.find((n) => n.id === data.bayatId);
+    const valid = !!(bayat && bayat.alive);
+    if (valid) {
+      bayat.alive = false;
+      const idx = this.bayats.list.indexOf(bayat);
+      if (idx >= 0) this.bayats.list.splice(idx, 1);
+    }
+    Multiplayer.send("hugResult", {
+      bayatId: data.bayatId,
+      winnerId: peerId,
+      valid,
+    });
+  },
+  mpOnHugResult(data) {
+    if (!this.coop) return;
+    if (data.winnerId === Multiplayer.selfId) {
+      delete this.mpPendingClaims[data.bayatId];
+    }
+    if (!data.valid) return;
+    const bayat = this.bayats.list.find((n) => n.id === data.bayatId);
+    if (!bayat) return; // already pruned locally (e.g. by a later snapshot) — nothing left to show
+    const idx = this.bayats.list.indexOf(bayat);
+    if (idx >= 0) this.bayats.list.splice(idx, 1);
+    if (data.winnerId === Multiplayer.selfId) {
+      this.applyHugReward(bayat, false);
+    } else {
+      this.mpPlayDeathFx(bayat); // someone else's win — cosmetic pop only, no reward
+    }
+  },
+  // Lightweight death particles/pop for a Bayat someone ELSE just hugged —
+  // deliberately NOT the full applyHugReward() path (no EXP/time/combo/
+  // camera-shake, those are personal to whoever actually won the claim).
+  mpPlayDeathFx(bayat) {
+    const type = bayat.type;
+    const pcolor = type.danger ? "#ff5c72" : type.glow ? "#ffd76a" : type.color;
+    this.particles.burst(bayat.x, bayat.y, pcolor, type.glow ? 24 : 12, {
+      maxSpeed: type.glow ? 220 : 140,
+      minLife: 0.3,
+      maxLife: 0.6,
+    });
+    this.deathFx.push({
+      x: bayat.x,
+      y: bayat.y,
+      radius: bayat.radius,
+      tintColor: type.tintColor,
+      tintStrength: type.tintStrength,
+      danger: type.danger,
+      t: 0,
+      duration: type.glow ? 0.36 : 0.24,
+    });
+  },
+  // Called from onHug() instead of applyHugReward() directly whenever
+  // this.coop is true — see CLAUDE.md "Multiplayer" protocol table.
+  mpRequestHug(bayat, isChainHug) {
+    if (Multiplayer.isHost) {
+      // I AM the authority — resolve immediately, no round trip needed.
+      if (!bayat.alive) return;
+      bayat.alive = false;
+      const idx = this.bayats.list.indexOf(bayat);
+      if (idx >= 0) this.bayats.list.splice(idx, 1);
+      Multiplayer.send("hugResult", {
+        bayatId: bayat.id,
+        winnerId: Multiplayer.selfId,
+        valid: true,
+      });
+      this.applyHugReward(bayat, isChainHug);
+    } else {
+      if (this.mpPendingClaims[bayat.id]) return; // already asked, awaiting hugResult
+      this.mpPendingClaims[bayat.id] = true;
+      Multiplayer.send("hugClaim", { bayatId: bayat.id });
+    }
+  },
+  // Timer hit 0 in co-op: go down instead of ending the run, as long as
+  // someone's still up to revive us. Called from update()'s timer-decay
+  // branch in place of endRun() — see there for the non-coop path.
+  mpBecomeDowned() {
+    if (this.player.downed) return;
+    const teammateUp = Object.values(this.mpPeers).some((p) => !p.downed);
+    if (!teammateUp) {
+      // Solo in this room, or everyone else is already down — no one left
+      // to revive us, so this plays out exactly like solo full mode.
+      this.endRun();
+      return;
+    }
+    this.player.downed = true;
+    this.player.downedFlashT = 0.6;
+    this.timer = 0;
+    this.camera.shake(6, 0.25);
+    UI.toast("You're down! Wait for a teammate with a medkit.", 3000);
+    Multiplayer.send("downedState", { downed: true });
+    this.mpCheckAllDowned();
+  },
+  mpCheckAllDowned() {
+    if (!this.coop || this.state !== "playing" || !this.player.downed) return;
+    const anyoneUp = Object.values(this.mpPeers).some((p) => !p.downed);
+    if (!anyoneUp) this.endRun();
+  },
+  mpOnDownedState(data, peerId) {
+    if (!this.coop) return;
+    const p = this.mpPeers[peerId];
+    if (!p) return;
+    p.downed = !!data.downed;
+    if (data.downed) {
+      p._reviveSent = false; // they can be revived again next time they go down
+      UI.toast(p.name + " is down!", 1800);
+    } else {
+      UI.toast(p.name + " is back up!", 1800);
+    }
+    this.mpCheckAllDowned();
+  },
+  // Only ever received by the specific downed peer it was targeted to
+  // (see mpUpdateReviveCheck's Multiplayer.send(..., id) below) — no
+  // broadcast, so no self-filtering needed here.
+  mpOnRevive(data, peerId) {
+    if (!this.coop || !this.player.downed) return;
+    this.player.downed = false;
+    this.player.downedFlashT = 0.6;
+    const reviveFraction = 0.4;
+    this.timer = clamp(
+      this.maxStoredTime * reviveFraction,
+      0,
+      this.maxStoredTime,
+    );
+    const byName = (this.mpPeers[peerId] && this.mpPeers[peerId].name) || "A teammate";
+    UI.toast(byName + " revived you!", 2200);
+    AudioSystem.levelup(); // reuse an existing uplifting cue rather than adding a new sound
+    this.particles.burst(this.player.x, this.player.y, "#6fe3a3", 26, {
+      maxSpeed: 200,
+      minLife: 0.35,
+      maxLife: 0.7,
+    });
+    Multiplayer.send("downedState", { downed: false });
+  },
+  // Reviver's side: holding a medkit + standing near a downed teammate's
+  // (network-interpolated) puppet position revives them automatically —
+  // "proximity... automatic on contact" per spec, no separate button.
+  mpUpdateReviveCheck() {
+    if (this.player.downed || this.player.medkits <= 0) return;
+    for (const id in this.mpPeers) {
+      const p = this.mpPeers[id];
+      if (!p.downed || p._reviveSent) continue;
+      if (dist2(this.player.x, this.player.y, p.x, p.y) < 46 * 46) {
+        this.player.medkits--;
+        p._reviveSent = true;
+        Multiplayer.send("revive", {}, id);
+        UI.toast("Reviving " + p.name + "...", 1600);
+        this.particles.burst(p.x, p.y, "#9adfff", 18, {
+          maxSpeed: 160,
+          minLife: 0.3,
+          maxLife: 0.55,
+        });
+      }
+    }
   },
 
   startGame(mode) {
@@ -407,6 +893,24 @@ const Game = {
     UI.hideUpgradeModal();
     UI.updateMenuStats();
     UI.showScreen("screen-menu");
+    if (this.coop) this.mpEndCoopSession();
+  },
+  // Leaves the Trystero room and resets every co-op-only flag — the
+  // single exit point for "this player is no longer in a co-op run",
+  // called on quitting to menu and (via retry's mode check) before
+  // starting a fresh solo run. Does NOT get called from endRun() itself —
+  // the results screen still needs this.coop/this.mpPeers intact so co-op
+  // stats/labels render correctly (see UI.showResults).
+  mpEndCoopSession() {
+    try {
+      if (this.mpAvailable()) Multiplayer.leave();
+    } catch (e) {
+      console.warn("[Co-op] error leaving room on quit (ignoring):", e);
+    }
+    this.coop = false;
+    this.mpInLobby = false;
+    this.mpPeers = {};
+    this.mpPendingClaims = {};
   },
 
   timeRewardFactor() {
@@ -662,7 +1166,25 @@ const Game = {
     }
   },
 
+  // The single choke point every hug source (proximity in checkHugs(),
+  // Orbit Buddies/Best Buds in tools.js, the double-hug chain below) goes
+  // through. In solo play this always resolves synchronously via
+  // applyHugReward(). In co-op it's arbitrated instead — see
+  // mpRequestHug() and CLAUDE.md "Multiplayer" section for the claim
+  // protocol. Either way, the caller doesn't need to know which path ran.
   onHug(bayat, isChainHug) {
+    if (this.coop) {
+      this.mpRequestHug(bayat, isChainHug);
+      return;
+    }
+    this.applyHugReward(bayat, isChainHug);
+  },
+  // Actually grants the reward for a hug that's already been confirmed
+  // valid (always true in solo play; only after host arbitration in
+  // co-op). Never call this directly for a hug that hasn't been through
+  // onHug() — that's what keeps co-op's claim arbitration from being
+  // bypassable.
+  applyHugReward(bayat, isChainHug) {
     const type = bayat.type;
     bayat.alive = false;
     this.player.triggerHug(bayat.x, bayat.y);
@@ -762,7 +1284,21 @@ const Game = {
 
     if (!type.danger) this.hugs++;
 
-    if (this.mode === "arcade") {
+    if (type.medkitType) {
+      // Co-op only (see pickType()'s filter — these never spawn solo).
+      // No EXP/time, just the consumable used to revive a downed
+      // teammate — see mpUpdateReviveCheck().
+      this.player.medkits++;
+      this.particles.text(bayat.x, bayat.y - 26, "MEDKIT!", "#9adfff", 18);
+      this.particles.text(
+        bayat.x,
+        bayat.y - 8,
+        "+1 medkit (" + this.player.medkits + ")",
+        "#7fe0ff",
+        13,
+      );
+      AudioSystem.chest();
+    } else if (this.mode === "arcade") {
       const expGain =
         6 *
         type.expMult *
@@ -1081,6 +1617,7 @@ const Game = {
   },
 
   checkHugs() {
+    if (this.player.downed) return; // can't hug while down — see mpBecomeDowned()
     const hr = this.player.hugRadius;
     for (const n of this.bayats.list) {
       if (!n.alive) continue;
@@ -1290,25 +1827,46 @@ const Game = {
           CONFIG.full.maxTimeStart -
             this.elapsed * CONFIG.full.maxTimeDecayPerSec,
         ) + (this.player.secondWindBonus || 0);
-      this.timer = Math.min(this.timer, this.maxStoredTime);
-      this.timer -= dt;
-      if (this.timer <= 0) {
-        if (!this.tryGuardianSave(this.maxStoredTime)) {
-          this.timer = 0;
-          this.endRun();
-          return;
+      // While downed the timer just sits at 0 — don't re-run the decay/
+      // zero check every frame, that would call mpBecomeDowned() (a no-op
+      // once already downed, but wasteful) or worse, tryGuardianSave()
+      // again on every single frame.
+      if (!this.player.downed) {
+        this.timer = Math.min(this.timer, this.maxStoredTime);
+        this.timer -= dt;
+        if (this.timer <= 0) {
+          if (!this.tryGuardianSave(this.maxStoredTime)) {
+            this.timer = 0;
+            if (this.coop) {
+              this.mpBecomeDowned();
+            } else {
+              this.endRun();
+            }
+            // Either path is a valid stopping point for this frame — mirror
+            // the single-player early-return rather than continuing to
+            // simulate a frame the run/player state no longer expects.
+            return;
+          }
         }
       }
     }
 
     this.player.update(dt, this.input);
     this.camera.follow(this.player.x, this.player.y, dt);
-    this.bayats.update(
-      dt,
-      this.elapsed,
-      this.player,
-      this.player.blackHoleLevel,
-    );
+    if (this.coop && !Multiplayer.isHost) {
+      // Non-host: Bayats are host-authoritative — just lerp toward the
+      // latest snapshot rather than running independent AI/spawning, so
+      // two players can never end up disagreeing about the same Bayat.
+      this.bayats.updateAsPuppets(dt);
+    } else {
+      this.bayats.update(
+        dt,
+        this.elapsed,
+        this.player,
+        this.player.blackHoleLevel,
+      );
+    }
+    if (this.coop) this.mpUpdateNetworking(dt);
     if (this.mode === "full") this.tools.update(dt, this.player, this.bayats);
     this.chests.update(
       dt,
@@ -1372,8 +1930,19 @@ const Game = {
   drawWorld() {
     const ctx = this.ctx,
       cam = this.camera;
+    // Clear the FULL physical backing buffer, not just the cam.w x cam.h
+    // region the dpr transform currently maps to. If cam.w/cam.h ever fall
+    // out of sync with the canvas's actual pixel size (a missed resize
+    // event on mobile — see resize() notes), clearing only the tracked
+    // region leaves a strip of old pixels untouched every frame; anything
+    // drawn there with alpha blending (zone tints, particles, ...) then
+    // keeps stacking on top of itself forever instead of being wiped,
+    // which is what turns a subtle effect into a solid garbled patch.
     ctx.save();
-    ctx.clearRect(0, 0, cam.w, cam.h);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    ctx.restore();
+    ctx.save();
     ctx.fillStyle = (this.arena && this.arena.bg) || "#120e1c";
     ctx.fillRect(0, 0, cam.w, cam.h);
     cam.applyShake(ctx, 1 / 60);
@@ -1655,6 +2224,9 @@ const Game = {
       ctx.globalAlpha = 1;
     }
 
+    if (this.coop) {
+      for (const id in this.mpPeers) drawRemotePlayer(ctx, cam, this.mpPeers[id]);
+    }
     if (this.player) this.player.draw(ctx, cam);
     if (this.tools) {
       for (const id in this.tools.active) {
@@ -1734,6 +2306,14 @@ const Game = {
         // repeatedly just wastes the frame. We just wait for 'contextrestored'.
         requestAnimationFrame(this.loop.bind(this));
         return;
+      }
+      // Cheap per-frame poll (two number comparisons) that self-heals a
+      // missed resize event — mobile browsers don't always fire 'resize'
+      // or 'visualViewport resize' for every address-bar/UI change, and a
+      // stale canvas.width/height vs. the real viewport is what causes
+      // the garbled/stretched-frame class of bug (see resize() notes).
+      if (this.camera.w !== innerWidth || this.camera.h !== innerHeight) {
+        this.resize();
       }
       const dt = Math.min(0.05, (ts - this.lastFrame) / 1000 || 0);
       this.lastFrame = ts;

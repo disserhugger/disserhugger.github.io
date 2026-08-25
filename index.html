@@ -37,6 +37,9 @@
               >Sunny Meadow</small
             >
           </button>
+          <button class="btn" data-action="show-coop">
+            ▶ Co-op<br /><small>hug Bayats together, peer-to-peer</small>
+          </button>
           <button class="btn" data-action="show-htp">How To Play</button>
           <button class="btn" data-action="show-settings">Settings</button>
         </div>
@@ -119,6 +122,90 @@
           <div class="arena-list" id="arena-list"></div>
           <div style="margin-top: 16px; display: flex; justify-content: center">
             <button class="btn ghost" data-action="back-menu">Back</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- CO-OP: profile (username + color) -->
+      <div id="screen-mp-profile" class="screen hidden">
+        <div class="panel" style="width: min(420px, 92vw)">
+          <h2>Choose Your Look</h2>
+          <p>Pick a name and color — this is how teammates will see you.</p>
+          <div class="setting-row" style="border-bottom: none">
+            <label for="mp-username-input">Username</label>
+          </div>
+          <input
+            type="text"
+            id="mp-username-input"
+            class="mp-text-input"
+            maxlength="16"
+            placeholder="Your name"
+            autocomplete="off"
+          />
+          <div class="mp-color-grid" id="mp-color-grid"></div>
+          <div class="menu-stack" style="margin-top: 18px">
+            <button class="btn primary" data-action="mp-save-profile">
+              Continue
+            </button>
+            <button class="btn ghost" data-action="back-menu">Back</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- CO-OP: host or join -->
+      <div id="screen-mp-hostjoin" class="screen hidden">
+        <div class="panel" style="width: min(420px, 92vw)">
+          <h2>Co-op</h2>
+          <p>Host a game and share the room code, or join a friend's.</p>
+          <div class="menu-stack">
+            <button class="btn primary" data-action="mp-host">
+              Host Game
+            </button>
+          </div>
+          <h3>Join a Game</h3>
+          <input
+            type="text"
+            id="mp-join-code-input"
+            class="mp-text-input mp-code-input"
+            maxlength="5"
+            placeholder="ROOM CODE"
+            autocomplete="off"
+          />
+          <div class="menu-stack" style="margin-top: 10px">
+            <button class="btn amber" data-action="mp-join">
+              Join Game
+            </button>
+            <button class="btn ghost" data-action="mp-edit-profile">
+              Change Name / Color
+            </button>
+            <button class="btn ghost" data-action="back-menu">Back</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- CO-OP: lobby (waiting room) -->
+      <div id="screen-mp-lobby" class="screen hidden">
+        <div class="panel" style="width: min(460px, 92vw)">
+          <h2>Lobby</h2>
+          <div id="mp-room-code-wrap">
+            <div class="mp-room-code-label">Room Code</div>
+            <div class="mp-room-code" id="mp-room-code">-----</div>
+            <button class="btn ghost" data-action="mp-copy-code">
+              Copy Code
+            </button>
+          </div>
+          <div id="mp-peer-list"></div>
+          <div class="menu-stack" style="margin-top: 16px">
+            <button
+              class="btn primary hidden"
+              id="mp-start-btn"
+              data-action="mp-start"
+            >
+              Start Run
+            </button>
+            <button class="btn ghost" data-action="mp-leave">
+              Leave Lobby
+            </button>
           </div>
         </div>
       </div>
@@ -313,6 +400,12 @@
     <script src="js/chests.js"></script>
     <script src="js/ui.js"></script>
     <script src="js/game.js"></script>
+    <!-- The ONLY module script in the project — see CLAUDE.md "Multiplayer"
+         section for why Trystero specifically needs this, and why it's
+         still safe alongside the classic-script/file:// setup everywhere
+         else. Deferred like any module: runs after parsing, before
+         DOMContentLoaded, so window.Multiplayer exists by Game.init(). -->
+    <script type="module" src="js/multiplayer.js?testbust=3"></script>
     <script src="js/main.js"></script>
   </body>
 </html>

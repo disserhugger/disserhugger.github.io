@@ -531,6 +531,102 @@ input[type="range"] {
   accent-color: var(--violet-bright);
 }
 
+/* ---------- Co-op multiplayer screens ---------- */
+.mp-text-input {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 8px 0 16px;
+  padding: 12px 14px;
+  background: var(--base2);
+  border: 3px solid var(--ink);
+  color: var(--text);
+  font-family: var(--font-pixel);
+  font-size: 14px;
+  letter-spacing: 1px;
+}
+.mp-text-input:focus {
+  outline: none;
+  border-color: var(--violet-bright);
+}
+.mp-text-input::placeholder {
+  color: var(--subtext);
+  opacity: 0.6;
+}
+.mp-code-input {
+  text-align: center;
+  text-transform: uppercase;
+  font-size: 20px;
+  letter-spacing: 6px;
+}
+.mp-color-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 10px;
+  margin-top: 4px;
+}
+.mp-color-swatch {
+  aspect-ratio: 1;
+  border: 3px solid var(--ink);
+  cursor: pointer;
+  box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.55);
+  transition: transform 0.06s steps(2);
+}
+.mp-color-swatch:hover {
+  transform: translate(-1px, -1px);
+}
+.mp-color-swatch.selected {
+  border-color: var(--amber-bright);
+  box-shadow:
+    0 0 0 2px var(--amber-bright),
+    3px 3px 0 rgba(0, 0, 0, 0.55);
+}
+#mp-room-code-wrap {
+  text-align: center;
+  margin-bottom: 18px;
+}
+.mp-room-code-label {
+  font-family: var(--font-pixel);
+  font-size: 11px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--subtext);
+}
+.mp-room-code {
+  font-family: var(--font-pixel);
+  font-size: clamp(28px, 8vw, 44px);
+  letter-spacing: 8px;
+  color: var(--amber-bright);
+  margin: 8px 0 14px;
+  text-shadow: 3px 3px 0 rgba(0, 0, 0, 0.55);
+}
+#mp-peer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.mp-player-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--base2);
+  border: 2px solid var(--overlay);
+  padding: 10px 12px;
+}
+.mp-player-swatch {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border: 2px solid var(--ink);
+}
+.mp-player-name {
+  font-family: var(--font-pixel);
+  font-size: 13px;
+  color: var(--text);
+  letter-spacing: 0.5px;
+}
+
 /* ---------- HUD ---------- */
 #hud {
   position: absolute;

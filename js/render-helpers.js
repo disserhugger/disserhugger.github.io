@@ -381,3 +381,59 @@ function drawZones(ctx, cam, zones) {
     ctx.fillRect(sx - z.r, sy - z.r, z.r * 2, z.r * 2);
   }
 }
+
+/* =========================================================
+   REMOTE PLAYER (co-op) — a lightweight puppet renderer for teammates,
+   NOT a second Player instance. Their real Player/buffs/tools only exist
+   on their own machine (see CLAUDE.md "Multiplayer" — local-only per-
+   player systems); everyone else just needs to see roughly where they
+   are, their name, and their color. Reuses the same player.png + the
+   same alpha-safe SpriteTint system as everything else — no new art,
+   and never emoji, per the project's pixel-art rule.
+   `puppet` is one entry of Game.mpPeers: {x, y, facing, color, name,
+   moving, downed, animT} — x/y are the interpolation-smoothed render
+   position Game keeps updating each frame, not the raw last-received
+   network sample (see Game.mpUpdateRemotePuppets). */
+function drawRemotePlayer(ctx, cam, puppet) {
+  const sx = puppet.x - cam.x,
+    sy = puppet.y - cam.y;
+  if (sx < -60 || sx > cam.w + 60 || sy < -60 || sy > cam.h + 60) return;
+  const radius = 18;
+  ctx.save();
+  ctx.translate(sx, sy);
+  ctx.beginPath();
+  ctx.ellipse(0, radius * 0.9, radius * 0.9, radius * 0.35, 0, 0, TAU);
+  ctx.fillStyle = "rgba(0,0,0,.35)";
+  ctx.fill();
+  const bob = puppet.moving
+    ? Math.sin(quantize(((puppet.animT || 0) % TAU) / TAU, 6) * TAU) * 2.5
+    : 0;
+  ctx.translate(0, bob);
+  if (Sprites.playerLoaded) {
+    const size = radius * 2.8;
+    ctx.imageSmoothingEnabled = false;
+    const tinted = SpriteTint.getTinted("player", puppet.color, 0.6);
+    ctx.globalAlpha = puppet.downed ? 0.5 : 1;
+    ctx.scale(puppet.facing < 0 ? -1 : 1, 1);
+    ctx.drawImage(tinted || Sprites.player, -size / 2, -size / 2, size, size);
+    ctx.globalAlpha = 1;
+  } else {
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0, TAU);
+    ctx.fillStyle = puppet.color;
+    ctx.globalAlpha = puppet.downed ? 0.5 : 1;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+  // name tag — plain canvas text, not DOM, so it scrolls with the world
+  ctx.save();
+  ctx.font = "bold 11px Consolas, 'Courier New', monospace"; // matches --font-pixel in css/style.css
+  ctx.textAlign = "center";
+  const label = puppet.name + (puppet.downed ? " (down)" : "");
+  ctx.fillStyle = "rgba(0,0,0,.65)";
+  ctx.fillText(label, sx + 1, sy - radius - 9);
+  ctx.fillStyle = puppet.downed ? "#ff8a8a" : "#fff";
+  ctx.fillText(label, sx, sy - radius - 10);
+  ctx.restore();
+}

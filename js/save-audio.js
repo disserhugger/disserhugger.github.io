@@ -8,6 +8,7 @@ const SaveSystem = {
   KEY_FULL: "bayatHug_fullGameBestTime",
   KEY_SETTINGS: "bayatHug_settings",
   KEY_LIFETIME: "bayatHug_lifetimeHugs",
+  KEY_MP_PROFILE: "bayatHug_mpProfile",
   // In-memory fallback used whenever localStorage isn't available (private
   // browsing on iOS Safari throws on every setItem, some Android WebViews
   // disable storage entirely, quota can fill up, etc). Scores still work
@@ -102,6 +103,26 @@ const SaveSystem = {
   resetScores() {
     this.safeRemove(this.KEY_ARCADE);
     this.safeRemove(this.KEY_FULL);
+  },
+  // Co-op multiplayer identity (username + color swatch) — separate from
+  // KEY_SETTINGS since it's player identity, not game options, but wrapped
+  // in the exact same safe try/catch pattern as everything else here.
+  getMpProfile() {
+    try {
+      const raw = this.safeGet(this.KEY_MP_PROFILE);
+      if (raw) {
+        const p = JSON.parse(raw);
+        if (p && typeof p.name === "string" && typeof p.color === "string") {
+          return p;
+        }
+      }
+    } catch (e) {}
+    return null;
+  },
+  setMpProfile(profile) {
+    try {
+      this.safeSet(this.KEY_MP_PROFILE, JSON.stringify(profile));
+    } catch (e) {}
   },
 };
 

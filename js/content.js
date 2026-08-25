@@ -65,6 +65,23 @@ const CONFIG = {
   },
 };
 
+/* Among-Us-style fixed color palette for co-op player identity (profile
+   screen swatches, remote-player nametags/avatars in multiplayer). Picked
+   for contrast against the dark UI panels and against each other; not
+   tied to any single arena's palette. See CLAUDE.md "Multiplayer" section. */
+const MP_COLORS = [
+  { id: "red", name: "Red", hex: "#ff5c72" },
+  { id: "blue", name: "Blue", hex: "#4aa3ff" },
+  { id: "green", name: "Green", hex: "#6fe3a3" },
+  { id: "yellow", name: "Yellow", hex: "#f5d90a" },
+  { id: "pink", name: "Pink", hex: "#ff7ab8" },
+  { id: "orange", name: "Orange", hex: "#ff7a3d" },
+  { id: "cyan", name: "Cyan", hex: "#7fd8e8" },
+  { id: "purple", name: "Purple", hex: "#a970ff" },
+  { id: "white", name: "White", hex: "#f2eefc" },
+  { id: "black", name: "Black", hex: "#2a2438" },
+];
+
 /* Bayat types: visual identity is created entirely from ONE base PNG.
    Color variants are produced by SpriteTint (see below), which recolors
    only the visible (alpha>0) pixels of the sprite and leaves transparent
@@ -292,6 +309,33 @@ const BAYAT_TYPES = {
     turnRate: 2.0,
     jitter: 0.2,
     slipChance: 0.008,
+  },
+  // Co-op only (see pickType()'s medkitType filter below) — hugging one
+  // doesn't give EXP/time like every other type, it gives a Medkit
+  // consumable used to revive a downed teammate. Reuses the same base
+  // sprite + SpriteTint like every other type; no new art.
+  medkit: {
+    key: "medkit",
+    label: "Medkit Bayat",
+    speedMult: 0.65,
+    sizeMult: 1.0,
+    expMult: 0,
+    rewardMult: 0,
+    color: "#9adfff",
+    dark: "#4a90b8",
+    weightBase: 1.2,
+    minDiff: 0,
+    flee: true,
+    danger: false,
+    glow: true,
+    medkitType: true,
+    tintColor: "#7fe0ff",
+    tintStrength: 0.6,
+    badge: "+",
+    badgeColor: "#dff6ff",
+    turnRate: 3.0,
+    jitter: 0.5,
+    slipChance: 0.02,
   },
 };
 

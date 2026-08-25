@@ -39,6 +39,10 @@ class Player {
     this.guardianTotal = 0;
     this.guardianUsed = 0;
     this.adrenalineLevel = 0;
+    // ---- co-op only (see CLAUDE.md "Multiplayer" section) ----
+    this.medkits = 0; // consumable count, granted by hugging a Medkit Bayat
+    this.downed = false; // co-op: replaces run-ending when timer hits 0, if a teammate is still up
+    this.downedFlashT = 0; // brief pulse when going down/getting revived, purely visual
   }
   get adrenalineMult() {
     if (!this.adrenalineLevel) return 1;
@@ -54,6 +58,7 @@ class Player {
     if (Game.arena) s *= Game.arena.playerSpeedMult;
     s *= this.snowSlowMult;
     s *= this.adrenalineMult;
+    if (this.downed) s *= 0.18; // "can't move much" per spec — a crawl, not a stop
     return s;
   }
   get hugRadius() {
@@ -189,8 +194,12 @@ class Player {
       ctx.imageSmoothingEnabled = false;
       const sprite = hurtBlink
         ? SpriteTint.getTinted("player", "#ff3b3b", 0.85) || Sprites.player
-        : Sprites.player;
+        : this.downed
+          ? SpriteTint.getTinted("player", "#4a4a5a", 0.8) || Sprites.player
+          : Sprites.player;
+      if (this.downed) ctx.globalAlpha = 0.6;
       ctx.drawImage(sprite, -size / 2, -size / 2, size, size);
+      ctx.globalAlpha = 1;
       ctx.restore();
     } else {
       // ---- procedural fallback (used if player.png fails to load) ----
@@ -454,6 +463,20 @@ class Bayat {
     this.x = clamp(this.x, this.radius, CONFIG.arena.width - this.radius);
     this.y = clamp(this.y, this.radius, CONFIG.arena.height - this.radius);
   }
+  // Co-op, non-host clients only: the host runs the real AI via update()
+  // above and periodically broadcasts {id, t, x, y} snapshots (see
+  // Game.mpApplyBayatSnapshot); everyone else just visually lerps this
+  // puppet's position toward the latest snapshot rather than simulating
+  // AI locally — this is what "host-authoritative Bayats" means in
+  // practice. Bob/animation still runs locally since it's purely
+  // cosmetic and doesn't need to be network-accurate.
+  updatePuppet(dt) {
+    this.animT += dt * 6;
+    if (this.netTargetX == null) return; // no snapshot yet — stay put
+    const t = Math.min(1, dt * 10);
+    this.x = lerp(this.x, this.netTargetX, t);
+    this.y = lerp(this.y, this.netTargetY, t);
+  }
   updateBombState(dt, player, d) {
     const cfg = CONFIG.bomb;
     if (this.bombState === "idle") {
@@ -708,6 +731,13 @@ class BayatManager {
     for (const key in BAYAT_TYPES) {
       const t = BAYAT_TYPES[key];
       if (diff < t.minDiff) continue;
+      // Medkits only matter in co-op (they revive downed teammates) — keep
+      // them out of the single-player pool entirely rather than spawning
+      // a pickup with no use. Co-op runs always use "full" mode semantics
+      // (timer-as-health) — Game.coop is the orthogonal flag for "this
+      // run is networked", not a third Game.mode value; see CLAUDE.md
+      // "Multiplayer" section.
+      if (t.medkitType && !Game.coop) continue;
       let w = t.weightBase;
       if (t.key === "golden") w *= luck;
       if (t.key === "dangerous")
@@ -756,6 +786,37 @@ class BayatManager {
         continue;
       }
       n.update(dt, player, this.list, blackHoleLevel);
+    }
+  }
+  // Co-op, non-host clients: called instead of update() above — no
+  // spawning, no AI, just cosmetic per-frame animation of whatever
+  // puppets the latest host snapshot put here.
+  updateAsPuppets(dt) {
+    for (const n of this.list) n.updatePuppet(dt);
+  }
+  // Co-op, non-host clients: reconciles this.list against the host's
+  // latest {id, t, x, y} snapshot array — adds puppets for newly-seen
+  // ids, updates lerp targets for existing ones, and drops anything the
+  // host no longer lists (it died — a hugResult already handled the
+  // death fx locally, this is just cleanup for ids we somehow missed,
+  // e.g. this client joined mid-run and never saw the original spawn).
+  applySnapshot(list, difficulty) {
+    const seen = {};
+    for (const s of list) {
+      seen[s.id] = true;
+      let n = this.list.find((b) => b.id === s.id);
+      if (!n) {
+        const type = BAYAT_TYPES[s.t];
+        if (!type) continue; // unknown type key — ignore rather than throw
+        n = new Bayat(type, s.x, s.y, difficulty || 0);
+        n.id = s.id;
+        this.list.push(n);
+      }
+      n.netTargetX = s.x;
+      n.netTargetY = s.y;
+    }
+    for (let i = this.list.length - 1; i >= 0; i--) {
+      if (!seen[this.list[i].id]) this.list.splice(i, 1);
     }
   }
   nearest(x, y, filterFn) {
