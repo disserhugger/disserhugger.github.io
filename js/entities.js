@@ -66,7 +66,8 @@ class Player {
       CONFIG.player.baseHugRadius *
       this.hugRadiusMult *
       (1 + this.longArmsBonus) *
-      this.adrenalineMult
+      this.adrenalineMult *
+      (this.boldHugsRadiusMult || 1) // Bold Hugs: trades radius for reward
     );
   }
   get totalExpMult() {
@@ -763,7 +764,15 @@ class BayatManager {
     if (type.key === "golden") Game.onGoldenEvent();
     return n;
   }
-  update(dt, elapsed, player, blackHoleLevel) {
+  // `extraSpawnAnchors` (co-op host only — see CLAUDE.md "Multiplayer"):
+  // remote peers' puppet positions (Game.mpPeers), so new Bayats populate
+  // near whichever player is actually exploring, not just the host. Bayat
+  // AI itself (Bayat.update() below) still only reacts to the host's own
+  // `player` — a Bayat spawned near a remote peer won't flee/chase them,
+  // it'll just sit there until that peer's local checkHugs() catches it.
+  // A real fix needs per-Bayat "nearest of N players" targeting, which is
+  // a bigger change than this — see CLAUDE.md known gaps.
+  update(dt, elapsed, player, blackHoleLevel, extraSpawnAnchors) {
     const diff = this.difficulty(elapsed);
     const targetCount = Math.round(
       lerp(CONFIG.spawn.initialCount, CONFIG.spawn.maxCount, diff) *
@@ -776,7 +785,11 @@ class BayatManager {
     );
     this.spawnTimer -= dt;
     if (this.list.length < targetCount && this.spawnTimer <= 0) {
-      this.spawnOne(player, diff, player.totalLuck);
+      const anchor =
+        extraSpawnAnchors && extraSpawnAnchors.length && Math.random() < 0.5
+          ? choice(extraSpawnAnchors)
+          : player;
+      this.spawnOne(anchor, diff, player.totalLuck);
       this.spawnTimer = interval;
     }
     for (let i = this.list.length - 1; i >= 0; i--) {

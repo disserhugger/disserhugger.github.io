@@ -969,7 +969,11 @@ const Game = {
           "snowball",
           CONFIG.snowball.slowDuration,
           (pl) => {
-            pl.snowSlowMult = 1 - CONFIG.snowball.slowAmount;
+            // Cozy Insulation (snowResistMult) weakens the slow itself
+            // rather than shortening the applyTempEffect duration, so the
+            // "Frozen" toast/timer still reads honestly.
+            pl.snowSlowMult =
+              1 - CONFIG.snowball.slowAmount * (1 - (pl.snowResistMult || 0));
           },
           (pl) => {
             pl.snowSlowMult = 1;
@@ -1194,7 +1198,13 @@ const Game = {
 
     if (!isChainHug) {
       const now = this.elapsed;
-      if (now - this.lastHugTime <= CONFIG.combo.window) {
+      // Combo Keeper (comboWindowBonus) extends how long the window stays
+      // open before a gap resets the streak — same field used again at
+      // the other combo-window check in update().
+      if (
+        now - this.lastHugTime <=
+        CONFIG.combo.window + (this.player.comboWindowBonus || 0)
+      ) {
         this.combo++;
       } else {
         this.combo = 1;
@@ -1205,16 +1215,25 @@ const Game = {
         UI.comboBanner("HUG x" + this.combo + "!");
     }
 
-    const comboBonus = Math.min(
-      CONFIG.combo.maxBonus,
-      (this.combo - 1) * CONFIG.combo.bonusPerLevel,
-    );
+    // Golden Aura (comboAmplifierMult) scales the combo bonus itself
+    // (applied AFTER the normal maxBonus clamp, so it genuinely raises
+    // the effective ceiling rather than just being absorbed by it).
+    const comboBonus =
+      Math.min(
+        CONFIG.combo.maxBonus,
+        (this.combo - 1) * CONFIG.combo.bonusPerLevel,
+      ) * (this.player.comboAmplifierMult || 1);
     const isMega =
       !type.danger &&
       !isChainHug &&
       this.player.megaHugChance > 0 &&
       Math.random() < this.player.megaHugChance;
-    const rewardMult = (this.player.warmHugsMult || 1) * (isMega ? 2 : 1);
+    // Bold Hugs (boldHugsRewardMult) trades hug radius (see Player.hugRadius
+    // getter) for a straight reward bump.
+    const rewardMult =
+      (this.player.warmHugsMult || 1) *
+      (this.player.boldHugsRewardMult || 1) *
+      (isMega ? 2 : 1);
     if (type.boostType) this.grantBoost(bayat);
 
     const pcolor = type.danger ? "#ff5c72" : type.glow ? "#ffd76a" : type.color;
@@ -1668,6 +1687,19 @@ const Game = {
       AudioSystem.chest();
     }
   },
+  // Warm Cocoa (timeRegenPerSec) — simple continuous regen, Full mode
+  // only (Arcade's timer is a shared countdown clock, not health, so
+  // regenerating it wouldn't mean anything). No particle text every
+  // frame — that would spam the screen — the EXP bar / timer readout
+  // updating is feedback enough, same as it is for e.g. Adrenaline.
+  applyTimeRegen(dt) {
+    if (!this.player.timeRegenPerSec || this.mode !== "full") return;
+    this.timer = clamp(
+      this.timer + this.player.timeRegenPerSec * dt,
+      0,
+      this.maxStoredTime,
+    );
+  },
 
   updateFxZones(dt) {
     for (let i = this.fxZones.length - 1; i >= 0; i--) {
@@ -1864,6 +1896,7 @@ const Game = {
         this.elapsed,
         this.player,
         this.player.blackHoleLevel,
+        this.coop ? Object.values(this.mpPeers) : null,
       );
     }
     if (this.coop) this.mpUpdateNetworking(dt);
@@ -1877,10 +1910,15 @@ const Game = {
     this.particles.update(dt);
     this.applyStickyArms(dt);
     if (this.mode === "full") this.applyTimePocket(dt);
+    if (this.mode === "full") this.applyTimeRegen(dt);
     this.updateFxZones(dt);
     this.updateTempEffects(dt);
     this.checkHugs();
-    if (this.combo > 0 && this.elapsed - this.lastHugTime > CONFIG.combo.window)
+    if (
+      this.combo > 0 &&
+      this.elapsed - this.lastHugTime >
+        CONFIG.combo.window + (this.player.comboWindowBonus || 0)
+    )
       this.combo = 0;
 
     for (let i = this.delayedEffects.length - 1; i >= 0; i--) {

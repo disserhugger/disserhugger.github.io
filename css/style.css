@@ -481,7 +481,7 @@ h1.game-title .accent {
   image-rendering: pixelated;
   background-image: url("../assets/icons.png");
   background-repeat: no-repeat;
-  background-size: 384px 336px; /* 8 cols x 7 rows @ 48px */
+  background-size: 384px 432px; /* 8 cols x 9 rows @ 48px */
   flex-shrink: 0;
 }
 

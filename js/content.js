@@ -661,6 +661,58 @@ const STAT_UPGRADES = [
       p.adrenalineLevel = l;
     },
   },
+  {
+    id: "warmcocoa",
+    name: "Warm Cocoa",
+    icon: "☕",
+    maxLevel: 5,
+    desc: (l) =>
+      `Passively regenerates ${(0.3 * l).toFixed(1)} time/sec (Full Game)`,
+    apply: (p, l) => {
+      p.timeRegenPerSec = 0.3 * l;
+    },
+  },
+  {
+    id: "combokeeper",
+    name: "Combo Keeper",
+    icon: "🔗",
+    maxLevel: 5,
+    desc: (l) => `Combo window lasts +${(0.25 * l).toFixed(2)}s longer`,
+    apply: (p, l) => {
+      p.comboWindowBonus = 0.25 * l;
+    },
+  },
+  {
+    id: "goldenaura",
+    name: "Golden Aura",
+    icon: "✨",
+    maxLevel: 5,
+    desc: (l) => `Combo bonus amplified by +${25 * l}%`,
+    apply: (p, l) => {
+      p.comboAmplifierMult = 1 + 0.25 * l;
+    },
+  },
+  {
+    id: "cozyinsulation",
+    name: "Cozy Insulation",
+    icon: "🧣",
+    maxLevel: 4,
+    desc: (l) => `Snowball slows are ${18 * l}% weaker`,
+    apply: (p, l) => {
+      p.snowResistMult = Math.min(0.8, 0.18 * l);
+    },
+  },
+  {
+    id: "boldhugs",
+    name: "Bold Hugs",
+    icon: "💗",
+    maxLevel: 5,
+    desc: (l) => `+${12 * l}% hug reward, but ${5 * l}% smaller hug radius`,
+    apply: (p, l) => {
+      p.boldHugsRewardMult = 1 + 0.12 * l;
+      p.boldHugsRadiusMult = 1 - 0.05 * l;
+    },
+  },
 ];
 
 const TOOL_DEFS = [
@@ -894,10 +946,72 @@ const TOOL_DEFS = [
     desc: (l) =>
       `Every few seconds, keeps an active combo alive even without a hug.`,
   },
+
+  /* ---- newer tools: each picks targets a different way than the pull/
+     slow/freeze-radius pattern above, for variety ---- */
+  {
+    id: "airplane",
+    name: "Paper Airplane",
+    icon: "✈️",
+    maxLevel: 5,
+    baseCooldown: 3.8,
+    desc: (l) =>
+      `Throws a plane toward the nearest Bayat, piercing everything in its path.`,
+    range: (l) => 380 + l * 55,
+  },
+  {
+    id: "firecracker",
+    name: "Firecracker String",
+    icon: "🧨",
+    maxLevel: 5,
+    baseCooldown: 7.0,
+    desc: (l) =>
+      `Zaps ${2 + Math.floor(l / 2)} random Bayats anywhere on screen, not just nearby.`,
+    // fire()'s dispatch unconditionally calls t.def.range(t.level) for
+    // every non-aura/orbit tool (see CLAUDE.md bug history — same class
+    // of bug as the missing-range() aura crash, just for the default
+    // cooldown path instead). This tool's actual targeting is screen-
+    // bound, not radius-bound, so `range` here is just a large safety
+    // value, not something fire()'s "firecracker" case reads.
+    range: () => 2400,
+    targets: (l) => 2 + Math.floor(l / 2),
+  },
+  {
+    id: "balloon",
+    name: "Love Balloon",
+    icon: "🎈",
+    maxLevel: 5,
+    baseCooldown: 6.2,
+    kind: "missile",
+    desc: (l) =>
+      `Releases ${1 + Math.floor(l / 2)} mini hearts that each seek out a different nearby Bayat.`,
+    range: (l) => 420 + l * 50,
+    travel: 0.55,
+  },
+  {
+    id: "duster",
+    name: "Feather Duster",
+    icon: "🪶",
+    maxLevel: 5,
+    kind: "aura",
+    tickInterval: 3,
+    desc: (l) => `Every few seconds, a wide sweep freezes everything nearby.`,
+    range: (l) => 150 + l * 22,
+  },
+  {
+    id: "cupid",
+    name: "Cupid's Arrow",
+    icon: "💘",
+    maxLevel: 5,
+    baseCooldown: 5.2,
+    desc: (l) =>
+      `Fires at the FARTHEST Bayat in range instead of the nearest — mops up stragglers.`,
+    range: (l) => 900 + l * 90,
+  },
 ];
 
 /* Pixel-art icon sprite sheet lookup: id -> [col,row] cell in assets/icons.png
-   (8 columns x 7 rows, 48px cells). Falls back to the def's emoji if an id
+   (8 columns x 9 rows, 48px cells). Falls back to the def's emoji if an id
    isn't in the sheet, so nothing ever renders blank. */
 const ICON_SPRITE = {
   shoes: [0, 0],
@@ -950,6 +1064,16 @@ const ICON_SPRITE = {
   bigbang: [7, 5],
   bestbuds: [0, 6],
   fortunesfavor: [1, 6],
+  warmcocoa: [2, 6],
+  combokeeper: [3, 6],
+  goldenaura: [4, 6],
+  cozyinsulation: [5, 6],
+  boldhugs: [6, 6],
+  airplane: [7, 6],
+  firecracker: [0, 7],
+  balloon: [1, 7],
+  duster: [2, 7],
+  cupid: [3, 7],
 };
 function iconHTML(id, sizePx, fallbackEmoji) {
   const cell = ICON_SPRITE[id];
@@ -957,7 +1081,7 @@ function iconHTML(id, sizePx, fallbackEmoji) {
     return `<span style="font-size:${sizePx}px;line-height:1;">${fallbackEmoji || "\u2726"}</span>`;
   const cellSize = 48;
   const scale = sizePx / cellSize;
-  return `<div class="pixel-icon" style="width:${sizePx}px;height:${sizePx}px;background-position:-${cell[0] * cellSize * scale}px -${cell[1] * cellSize * scale}px;background-size:${384 * scale}px ${336 * scale}px;"></div>`;
+  return `<div class="pixel-icon" style="width:${sizePx}px;height:${sizePx}px;background-position:-${cell[0] * cellSize * scale}px -${cell[1] * cellSize * scale}px;background-size:${384 * scale}px ${432 * scale}px;"></div>`;
 }
 
 /* =========================================================

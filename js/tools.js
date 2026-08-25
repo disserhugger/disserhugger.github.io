@@ -100,6 +100,32 @@ class ToolSystem {
           AudioSystem.toolFire();
         }
       }
+    } else if (t.def.id === "duster") {
+      // Periodic full-radius freeze burst, like comfortaura/partyhorn's
+      // timer pattern — distinct from cuddleaura's continuous per-frame
+      // slow, this is an instant sweep every few seconds.
+      t.timer = (t.timer || 0) - dt;
+      if (t.timer <= 0) {
+        t.timer = t.def.tickInterval;
+        const targets = nm.inRadius(player.x, player.y, range);
+        for (const n of targets) {
+          n.frozenT = Math.max(n.frozenT, 0.5 + t.level * 0.08);
+        }
+        Game.particles.burst(player.x, player.y, "#ffe1a8", 18, {
+          maxSpeed: 140,
+          minLife: 0.3,
+          maxLife: 0.6,
+        });
+        Game.telegraphs.push({
+          x: player.x,
+          y: player.y,
+          r: range,
+          color: "#ffe1a8",
+          t: 0.3,
+          maxT: 0.3,
+        });
+        if (targets.length) AudioSystem.toolFire();
+      }
     } else if (t.def.id === "gravitywell") {
       // Synergy result (Black Hole + Vacuum): a permanent, always-on strong
       // pull — non-dangerous Bayats get a steady stream of near-guaranteed
@@ -772,6 +798,138 @@ class ToolSystem {
             AudioSystem.golden();
           },
         });
+        break;
+      }
+      case "airplane": {
+        // Pierces every non-danger Bayat in a narrow cone aimed at the
+        // nearest one — the only tool that hits a LINE of targets instead
+        // of a radius around the player or a single picked point.
+        const aimTarget = nm.nearest(player.x, player.y, (n) => !n.type.danger);
+        if (!aimTarget) break;
+        const angle = Math.atan2(
+          aimTarget.y - player.y,
+          aimTarget.x - player.x,
+        );
+        const coneHalfAngle = 0.22; // ~12.6 degrees either side
+        const targets = nm.list.filter((n) => {
+          if (!n.alive || n.type.danger) return false;
+          if (dist(player.x, player.y, n.x, n.y) > range) return false;
+          let diff = Math.abs(Math.atan2(n.y - player.y, n.x - player.x) - angle);
+          if (diff > Math.PI) diff = TAU - diff;
+          return diff < coneHalfAngle;
+        });
+        for (const n of targets) {
+          n.hookedT = Math.max(n.hookedT, 0.4);
+        }
+        Game.ropeLines.push({
+          x1: player.x,
+          y1: player.y,
+          x2: player.x + Math.cos(angle) * range,
+          y2: player.y + Math.sin(angle) * range,
+          t: 0,
+          dur: 0.22,
+          color: "#7fd8e8",
+        });
+        if (targets.length) AudioSystem.toolFire();
+        break;
+      }
+      case "firecracker": {
+        // Targets are picked from anywhere currently on screen, not
+        // within a radius of the player — see the def's `range` comment
+        // in content.js for why it still has one anyway.
+        const maxTargets = t.def.targets ? t.def.targets(t.level) : 2;
+        const cam = Game.camera;
+        const pool = nm.list.filter(
+          (n) =>
+            n.alive &&
+            !n.type.danger &&
+            n.x > cam.x - 40 &&
+            n.x < cam.x + cam.w + 40 &&
+            n.y > cam.y - 40 &&
+            n.y < cam.y + cam.h + 40,
+        );
+        const total = Math.min(pool.length, maxTargets);
+        for (let i = 0; i < total; i++) {
+          const idx = randInt(0, pool.length - 1);
+          const n = pool.splice(idx, 1)[0];
+          if (!n) continue;
+          n.hookedT = Math.max(n.hookedT, 0.4);
+          // strikes straight down onto the target rather than from the
+          // player — reinforces that this isn't a "reach out" tool
+          Game.lightningBolts.push({
+            x1: n.x,
+            y1: n.y - 60,
+            x2: n.x,
+            y2: n.y,
+            t: 0,
+            dur: 0.18,
+          });
+        }
+        if (total > 0) AudioSystem.toolFire();
+        break;
+      }
+      case "balloon": {
+        const maxHearts = 1 + Math.floor(t.level / 2);
+        const poolCopy = nm.list.filter(
+          (n) =>
+            n.alive &&
+            !n.type.danger &&
+            dist(player.x, player.y, n.x, n.y) <= range,
+        );
+        const chosen = [];
+        while (chosen.length < maxHearts && poolCopy.length) {
+          const idx = randInt(0, poolCopy.length - 1);
+          chosen.push(poolCopy.splice(idx, 1)[0]);
+        }
+        for (const target of chosen) {
+          const d = dist(player.x, player.y, target.x, target.y);
+          const travel =
+            Math.min(t.def.travel, Math.max(0.18, d / 900)) *
+            (player.quickTossMult || 1);
+          const targetId = target.id;
+          Game.projectiles.push({
+            kind: "missile",
+            x: player.x,
+            y: player.y,
+            targetId,
+            t: 0,
+            dur: travel,
+          });
+          Game.delayedEffects.push({
+            t: travel,
+            fn: () => {
+              const n = nm.list.find((nn) => nn.id === targetId && nn.alive);
+              if (n) {
+                n.hookedT = Math.max(n.hookedT, 0.5);
+                Game.particles.burst(n.x, n.y, "#ff9dc9", 12, {
+                  maxSpeed: 130,
+                });
+              }
+            },
+          });
+        }
+        if (chosen.length) AudioSystem.toolFire();
+        break;
+      }
+      case "cupid": {
+        // Targets the FARTHEST non-danger Bayat in range instead of the
+        // nearest/cluster — every other tool aims close, this one mops
+        // up whatever straggler is about to wander out of range.
+        let best = null,
+          bd = -1;
+        for (const n of nm.list) {
+          if (!n.alive || n.type.danger) continue;
+          const d = dist(player.x, player.y, n.x, n.y);
+          if (d <= range && d > bd) {
+            bd = d;
+            best = n;
+          }
+        }
+        if (!best) break;
+        best.hookedT = Math.max(best.hookedT, 0.7);
+        drawRopeLine(player, best, "#ff7ab8");
+        Game.particles.burst(best.x, best.y, "#ff7ab8", 14, { maxSpeed: 140 });
+        AudioSystem.toolFire();
         break;
       }
     }
