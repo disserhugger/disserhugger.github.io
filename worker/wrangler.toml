@@ -1,0 +1,27 @@
+# Cloudflare Worker + Durable Object — the co-op WebSocket relay.
+# This is the RECOMMENDED co-op setup. Your game stays on GitHub Pages;
+# this only provides the relay it connects out to.
+#
+# Deploy from inside this `worker/` directory:
+#   npx wrangler login
+#   npx wrangler deploy
+#
+# Full walkthrough: worker/README-relay.md
+#
+# (The optional TURN-credential worker has its own config now:
+#  wrangler-turn.toml — you do NOT need it when using this relay.)
+
+name = "bayat-coop-relay"
+main = "relay-worker.js"
+compatibility_date = "2026-01-01"
+
+[[durable_objects.bindings]]
+name = "COOP_ROOM"
+class_name = "CoopRoom"
+
+# IMPORTANT: must be `new_sqlite_classes`, NOT `new_classes`.
+# The Workers FREE plan only supports Durable Objects with the SQLite
+# storage backend; using `new_classes` fails to deploy on the free plan.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["CoopRoom"]

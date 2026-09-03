@@ -43,6 +43,7 @@ class Player {
     this.medkits = 0; // consumable count, granted by hugging a Medkit Bayat
     this.downed = false; // co-op: replaces run-ending when timer hits 0, if a teammate is still up
     this.downedFlashT = 0; // brief pulse when going down/getting revived, purely visual
+    this.invertControlsT = 0; // rare jumpscare outcome — see Game.triggerJumpscare()
   }
   get adrenalineMult() {
     if (!this.adrenalineLevel) return 1;
@@ -58,16 +59,31 @@ class Player {
     if (Game.arena) s *= Game.arena.playerSpeedMult;
     s *= this.snowSlowMult;
     s *= this.adrenalineMult;
+    s *= this.combo10SpeedMult || 1; // Combo Milestone x10 — see Game.onComboMilestone()
+    if (Game.hyperModeActive) s *= CONFIG.hyperMode.speedMult;
+    if (Game.runModifier && Game.runModifier.playerSpeedRunMult) {
+      s *= Game.runModifier.playerSpeedRunMult;
+    }
+    // Giant Mode event: the trade-off side (see hugRadius/draw() for the
+    // reach/visual side of the same event).
+    if (Game.activeEvent && Game.activeEvent.def.playerSpeedEventMult) {
+      s *= Game.activeEvent.def.playerSpeedEventMult;
+    }
     if (this.downed) s *= 0.18; // "can't move much" per spec — a crawl, not a stop
     return s;
   }
   get hugRadius() {
+    // Giant Mode event: bigger reach to go with the bigger sprite (see
+    // draw() for the visual side, speed getter for the trade-off side).
+    const giantMult =
+      (Game.activeEvent && Game.activeEvent.def.playerScaleEventMult) || 1;
     return (
       CONFIG.player.baseHugRadius *
       this.hugRadiusMult *
       (1 + this.longArmsBonus) *
       this.adrenalineMult *
-      (this.boldHugsRadiusMult || 1) // Bold Hugs: trades radius for reward
+      (this.boldHugsRadiusMult || 1) * // Bold Hugs: trades radius for reward
+      giantMult
     );
   }
   get totalExpMult() {
@@ -91,6 +107,16 @@ class Player {
     if (input.right) dx += 1;
     if (input.up) dy -= 1;
     if (input.down) dy += 1;
+    // Rare jumpscare outcome: inverted controls for a few seconds — see
+    // Game.triggerJumpscare()'s "invert" branch. Reverse World event uses
+    // the same flip, just gated on the active event instead of a timer.
+    if (
+      this.invertControlsT > 0 ||
+      (Game.activeEvent && Game.activeEvent.def.invertControls)
+    ) {
+      dx = -dx;
+      dy = -dy;
+    }
     this.moving = dx !== 0 || dy !== 0;
     if (this.moving) {
       const len = Math.sqrt(dx * dx + dy * dy);
@@ -114,6 +140,7 @@ class Player {
     this.y = clamp(this.y, this.radius, CONFIG.arena.height - this.radius);
     if (this.hugFlashT > 0) this.hugFlashT -= dt;
     if (this.hurtFlashT > 0) this.hurtFlashT -= dt;
+    if (this.invertControlsT > 0) this.invertControlsT -= dt;
     this.animT += dt * (this.moving ? 9 : 2.4);
     // pixel afterimage trail while turbo-boosted (dash effect)
     if (this.turboBoostT > 0) {
@@ -191,7 +218,11 @@ class Player {
         ctx.shadowColor = "#ffd76a";
         ctx.shadowBlur = 16;
       }
-      const size = this.radius * 2.8;
+      // Giant Mode event: purely visual scale-up (collision/arena-bounds
+      // stay tied to the real this.radius — only the sprite grows).
+      const giantVisualMult =
+        (Game.activeEvent && Game.activeEvent.def.playerScaleEventMult) || 1;
+      const size = this.radius * 2.8 * giantVisualMult;
       ctx.imageSmoothingEnabled = false;
       const sprite = hurtBlink
         ? SpriteTint.getTinted("player", "#ff3b3b", 0.85) || Sprites.player
@@ -276,6 +307,16 @@ class Player {
    BAYAT
    ========================================================= */
 let BAYAT_UID = 1;
+// Pool the Chaos Bayat's periodic re-tint picks from — deliberately reuses
+// hues already used elsewhere in the game rather than inventing new ones.
+const CHAOS_TINT_COLORS = [
+  "#ff7ab8",
+  "#7fd8e8",
+  "#ffd76a",
+  "#a970ff",
+  "#6fe3a3",
+  "#ff5c72",
+];
 class Bayat {
   constructor(type, x, y, difficulty) {
     this.id = BAYAT_UID++;
@@ -284,7 +325,12 @@ class Bayat {
     this.y = y;
     this.vx = 0;
     this.vy = 0;
-    this.radius = CONFIG.bayatBaseRadius * type.sizeMult;
+    this.radius =
+      CONFIG.bayatBaseRadius *
+      type.sizeMult *
+      (Game.runModifier && Game.runModifier.bayatSizeMult
+        ? Game.runModifier.bayatSizeMult
+        : 1);
     this.baseSpeed =
       CONFIG.bayatBaseSpeed *
       type.speedMult *
@@ -310,7 +356,18 @@ class Bayat {
     this.anchorY = 0;
   }
   get effectiveSpeed() {
-    let s = this.baseSpeed;
+    let s = this.baseSpeed * (this.chaosSpeedMult || 1);
+    // Panic / Slow Motion / Time Stop / Chaos Mode events (bayatSpeedMult).
+    // Explicit undefined check, not truthiness — Time Stop's 0 is a
+    // deliberate, meaningful value that a `if (...mult)` check would
+    // silently skip (0 is falsy in JS).
+    if (Game.activeEvent && Game.activeEvent.def.bayatSpeedMult !== undefined) {
+      s *= Game.activeEvent.def.bayatSpeedMult;
+    }
+    // Fast World run modifier (see ARENA_MODIFIERS in content.js).
+    if (Game.runModifier && Game.runModifier.bayatSpeedMult) {
+      s *= Game.runModifier.bayatSpeedMult;
+    }
     if (this.slowT > 0) s *= 0.35;
     if (this.frozenT > 0) s = 0;
     return s;
@@ -319,6 +376,38 @@ class Bayat {
     if (this.spawnT < 1) this.spawnT = Math.min(1, this.spawnT + dt * 3.2);
     this.animT += dt * (this.effectiveSpeed > 4 ? 8 : 2.5);
     if (this.throwFlashT > 0) this.throwFlashT -= dt;
+    // Ghost Bayat: cycles solid/phased regardless of any other state (CC,
+    // spawn animation, etc). While phased it can't be hugged at all — see
+    // the checkHugs() skip in game.js — but tool-pull effects still land
+    // on it visually, so a phased ghost can drift around from being
+    // yanked without you actually being able to catch it. `this.ghostTimer`
+    // starts undefined; `(x||0)-dt` going negative on the very first frame
+    // is the lazy-init, no constructor change needed.
+    if (this.type.ghostType) {
+      this.ghostTimer = (this.ghostTimer || 0) - dt;
+      if (this.ghostTimer <= 0) {
+        this.ghostPhased = !this.ghostPhased;
+        this.ghostTimer = this.ghostPhased ? rand(1.0, 1.8) : rand(1.6, 2.6);
+      }
+    }
+    // Chaos Bayat: periodically re-rolls its own speed and tint, purely
+    // cosmetic + a speed wobble — reward itself is rolled separately at
+    // hug-time (see Game.applyHugReward's chaosType branch), not tied to
+    // this timer. Never mutates `this.type` (a SHARED object every Bayat
+    // of this kind points to) — per-instance overrides only.
+    if (this.type.chaosType) {
+      this.chaosTimer = (this.chaosTimer || 0) - dt;
+      if (this.chaosTimer <= 0) {
+        this.chaosTimer = rand(1.8, 3.2);
+        this.chaosSpeedMult = rand(0.6, 2.4);
+        this.chaosTintColor = choice(CHAOS_TINT_COLORS);
+        Game.particles.burst(this.x, this.y, this.chaosTintColor, 10, {
+          maxSpeed: 100,
+          minLife: 0.25,
+          maxLife: 0.5,
+        });
+      }
+    }
     if (this.frozenT > 0) {
       this.frozenT -= dt;
       return;
@@ -369,6 +458,8 @@ class Bayat {
         maxSize: 3,
       });
       AudioSystem.slip();
+      Game.slipsWatched = (Game.slipsWatched || 0) + 1;
+      if (Game.slipsWatched >= 10) Game.checkAchievement("slips10");
       return;
     }
     let fx = 0,
@@ -545,6 +636,12 @@ class Bayat {
     // Bomb Bayat: tint flashes faster and brighter as detonation approaches
     let tintColorOverride = this.type.tintColor,
       tintStrengthOverride = this.type.tintStrength;
+    // Chaos Bayat: its periodic re-roll overrides the type's own fixed
+    // tint — see the chaosType branch in update().
+    if (this.type.chaosType && this.chaosTintColor) {
+      tintColorOverride = this.chaosTintColor;
+      tintStrengthOverride = 0.65;
+    }
     let bombBlink = false;
     if (this.type.bombType && this.bombState !== "idle") {
       const rate = this.bombState === "critical" ? 16 : 8;
@@ -555,8 +652,13 @@ class Bayat {
       }
     }
 
+    // Ghost Bayat: fades to near-invisible while phased, the visual tell
+    // that it can't be hugged right now — see update()'s ghostType branch.
+    const ghostAlpha =
+      this.type.ghostType && this.ghostPhased ? 0.28 : 1;
     if (Sprites.bayatLoaded) {
       ctx.save();
+      ctx.globalAlpha = ghostAlpha;
       const size = this.radius * 2.9;
       ctx.imageSmoothingEnabled = false;
       if (this.type.glow) {
@@ -740,9 +842,19 @@ class BayatManager {
       // "Multiplayer" section.
       if (t.medkitType && !Game.coop) continue;
       let w = t.weightBase;
-      if (t.key === "golden") w *= luck;
+      // Golden Minute / Chaos Mode events (goldenWeightMult) heavily
+      // favor Golden and Diamond spawns while active.
+      const ev = Game.activeEvent && Game.activeEvent.def;
+      const evLuck = ev && ev.luckMult ? luck * ev.luckMult : luck;
+      if (t.key === "golden") w *= evLuck * (ev && ev.goldenWeightMult ? ev.goldenWeightMult : 1);
+      if (t.diamondType) w *= evLuck * (ev && ev.goldenWeightMult ? ev.goldenWeightMult : 1);
       if (t.key === "dangerous")
-        w *= (1 + diff * 0.6) * (Game.arena ? Game.arena.spawnDangerMult : 1);
+        w *=
+          (1 + diff * 0.6) *
+          (Game.arena ? Game.arena.spawnDangerMult : 1) *
+          (Game.runModifier && Game.runModifier.dangerWeightMult
+            ? Game.runModifier.dangerWeightMult
+            : 1);
       pool.push({ item: t, weight: w });
     }
     return weightedPick(pool);
@@ -762,6 +874,8 @@ class BayatManager {
     const n = new Bayat(type, x, y, diff);
     this.list.push(n);
     if (type.key === "golden") Game.onGoldenEvent();
+    else if (type.diamondType) Game.onDiamondEvent();
+    else if (type.miniBoss) Game.onMiniBossEvent(type);
     return n;
   }
   // `extraSpawnAnchors` (co-op host only — see CLAUDE.md "Multiplayer"):
@@ -774,15 +888,28 @@ class BayatManager {
   // a bigger change than this — see CLAUDE.md known gaps.
   update(dt, elapsed, player, blackHoleLevel, extraSpawnAnchors) {
     const diff = this.difficulty(elapsed);
+    // Hyper Hug Mode and spawn-flavored random events (Bayat Rush, Bayat
+    // Stampede, ...) both push spawn density/speed through these two
+    // multipliers rather than their own bespoke code paths — see
+    // CONFIG.hyperMode.spawnRateMult and each event def's `spawnMult` in
+    // content.js's EVENT_POOL.
+    let densityMult = player.curseSpawnMult || 1;
+    let speedMult = 1;
+    if (Game.hyperModeActive) {
+      densityMult *= CONFIG.hyperMode.spawnRateMult;
+      speedMult *= CONFIG.hyperMode.spawnRateMult;
+    }
+    if (Game.activeEvent && Game.activeEvent.def.spawnMult) {
+      densityMult *= Game.activeEvent.def.spawnMult;
+      speedMult *= Game.activeEvent.def.spawnMult;
+    }
     const targetCount = Math.round(
       lerp(CONFIG.spawn.initialCount, CONFIG.spawn.maxCount, diff) *
-        (player.curseSpawnMult || 1),
+        densityMult,
     );
-    const interval = lerp(
-      CONFIG.spawn.baseInterval,
-      CONFIG.spawn.minInterval,
-      diff,
-    );
+    const interval =
+      lerp(CONFIG.spawn.baseInterval, CONFIG.spawn.minInterval, diff) /
+      speedMult;
     this.spawnTimer -= dt;
     if (this.list.length < targetCount && this.spawnTimer <= 0) {
       const anchor =

@@ -1,0 +1,12 @@
+# Cloudflare Worker config for the TURN credential minter.
+# Deploy from inside this `worker/` directory:  npx wrangler deploy
+# Full setup walkthrough: worker/README.md
+
+name = "bayat-turn"
+main = "turn-worker.js"
+compatibility_date = "2026-01-01"
+
+# TURN_KEY_ID and TURN_KEY_API_TOKEN are NOT set here on purpose — they
+# are secrets and must never be committed. Set them once with:
+#   npx wrangler secret put TURN_KEY_ID
+#   npx wrangler secret put TURN_KEY_API_TOKEN

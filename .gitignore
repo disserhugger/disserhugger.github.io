@@ -1,0 +1,26 @@
+# ---- SECRETS — never commit these -------------------------------------
+# Wrangler's local development secrets file. This is the ONE file in this
+# project that would contain your TURN key in plaintext. It's created if
+# you ever run `npx wrangler dev` with local secrets. Real deployments
+# use `npx wrangler secret put`, which sends the value straight to
+# Cloudflare and never writes it to disk here.
+.dev.vars
+.dev.vars.*
+worker/.dev.vars
+worker/.dev.vars.*
+
+# Generic env files, in case you ever add tooling that uses them.
+.env
+.env.*
+!.env.example
+
+# ---- tooling / editor -------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Wrangler build/state output
+.wrangler/
+worker/.wrangler/
+node_modules/

@@ -389,6 +389,51 @@ h1.game-title .accent {
   font-family: var(--font-pixel);
 }
 
+/* ---------- Achievements ---------- */
+.ach-progress {
+  font-family: var(--font-pixel);
+  font-size: 12px;
+  color: var(--amber-bright);
+  letter-spacing: 1px;
+  margin-bottom: 12px;
+  text-align: center;
+}
+.ach-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--base2);
+  border: 2px solid var(--overlay);
+  border-left: 5px solid var(--violet-bright);
+  padding: 10px 14px;
+}
+.ach-card.locked {
+  opacity: 0.55;
+  border-left-color: var(--overlay);
+}
+.ach-card .ach-icon {
+  font-size: 26px;
+  width: 30px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.ach-card .ach-name {
+  font-family: var(--font-pixel);
+  font-size: 13px;
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.ach-card .ach-desc {
+  font-size: 11.5px;
+  color: var(--subtext);
+  margin-top: 3px;
+  line-height: 1.4;
+}
+.ach-card.unlocked .ach-name {
+  color: var(--amber-bright);
+}
+
 .inv-tabs {
   display: flex;
   gap: 8px;
@@ -626,6 +671,21 @@ input[type="range"] {
   color: var(--text);
   letter-spacing: 0.5px;
 }
+/* Live co-op connection readout (CONFIG.coop.debug) */
+#mp-conn-status {
+  font-family: var(--font-pixel);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-align: center;
+  margin-top: 10px;
+  text-transform: uppercase;
+}
+#mp-conn-status.mp-conn-ok {
+  color: var(--good);
+}
+#mp-conn-status.mp-conn-bad {
+  color: var(--danger);
+}
 
 /* ---------- HUD ---------- */
 #hud {
@@ -639,34 +699,55 @@ input[type="range"] {
 #hud.active {
   display: block;
 }
-.hud-topbar {
+/* One cohesive top panel: stats row + EXP bar inside a single bordered
+   container, centered. Replaces the old layout where the stat blocks,
+   the EXP bar and the level chip were three independently-positioned
+   things that drifted apart (and let the event banner overlap the EXP
+   label) on different screen sizes. */
+.hud-panel {
   position: absolute;
-  top: 10px;
-  left: 10px;
-  right: 10px;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, calc(100vw - 16px));
+  background: rgba(14, 10, 22, 0.88);
+  border: 2px solid var(--violet-bright);
+  box-shadow:
+    0 0 0 2px var(--ink),
+    3px 3px 0 rgba(0, 0, 0, 0.55);
+  padding: 6px 8px 7px;
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
-.hud-top {
+.hud-stats {
   display: flex;
-  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+.hud-stat {
+  display: flex;
+  flex-direction: column;
   align-items: flex-start;
-  gap: 8px;
-  flex-wrap: wrap;
+  line-height: 1.1;
+  min-width: 0;
 }
-.hud-stat-group {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
+.hud-stat-level {
+  align-items: flex-end;
+  pointer-events: auto; /* tapping the level chip pauses — see #pause-hint */
+  cursor: pointer;
 }
-.hud-block {
-  background: rgba(18, 14, 28, 0.85);
-  border: 2px solid var(--violet-bright);
-  border-radius: 0;
-  padding: 5px 9px;
-  min-width: 62px;
-  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.5);
+.hud-spacer {
+  flex: 1;
+}
+/* Thin dividers instead of giving every stat its own box — far less
+   visual noise at a glance while keeping the groups readable. */
+.hud-sep {
+  width: 2px;
+  align-self: stretch;
+  background: var(--overlay);
+  opacity: 0.6;
+  flex-shrink: 0;
 }
 .hud-label {
   font-size: 8px;
@@ -676,11 +757,17 @@ input[type="range"] {
   white-space: nowrap;
 }
 .hud-value {
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 700;
   color: var(--text);
   font-family: var(--font-pixel);
-  line-height: 1.2;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+/* Fixed width on the timer so its digits never shove the rest of the row
+   sideways as the number changes (60.0 -> 9.8 -> 12.3). */
+.hud-stat-timer .hud-value {
+  min-width: 62px;
 }
 .hud-value.timer {
   color: var(--amber-bright);
@@ -701,16 +788,29 @@ input[type="range"] {
 .hud-value.combo {
   color: var(--pink);
 }
+/* Combo pops on each increase — class toggled by UI.updateHud(). */
+.hud-value.combo.bump {
+  animation: comboBump 0.22s steps(3);
+}
+@keyframes comboBump {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.35);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
 
 #expbar-wrap {
   width: 100%;
-  max-width: 460px;
-  margin: 0 auto;
 }
 #expbar-bg {
-  height: 12px;
+  height: 14px;
   background: var(--ink);
-  border: 2px solid var(--violet-bright);
+  border: 2px solid var(--overlay);
   overflow: hidden;
   position: relative;
 }
@@ -722,14 +822,22 @@ input[type="range"] {
     var(--violet-bright) 0 6px,
     var(--pink) 6px 12px
   );
+  transition: width 0.12s linear;
 }
+/* Label sits INSIDE the bar now — it used to be a separate line below,
+   which is what the event banner kept colliding with. */
 #level-label {
-  text-align: center;
-  font-size: 9px;
-  color: var(--amber-bright);
-  margin-top: 3px;
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  color: var(--text);
   letter-spacing: 1.5px;
   text-transform: uppercase;
+  text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.9);
+  pointer-events: none;
 }
 
 .hud-bottom-left {
@@ -1018,6 +1126,42 @@ body.compact-hud #menu-fab {
   opacity: 1;
   transform: translate(-50%, 0);
 }
+/* Persistent indicator while a random event or Hyper Hug Mode is active —
+   distinct from #combo-banner/#event-toast (those are transient pops);
+   this one stays up for the whole duration so it's always clear "why is
+   everything acting weird right now". */
+#active-event-banner {
+  /* In normal flow inside .hud-panel (see index.html) — it simply adds a
+     row to the panel when active, so it can never overlap the EXP bar.
+     `display:none` via .hidden means the panel shrinks back when idle. */
+  align-self: center;
+  font-family: var(--font-pixel);
+  font-size: 11px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  background: rgba(10, 6, 16, 0.9);
+  border: 2px solid var(--amber-bright);
+  color: var(--amber-bright);
+  padding: 4px 12px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#active-event-banner.hyper {
+  border-color: var(--pink);
+  color: var(--pink);
+  animation: hyperPulse 0.5s steps(2) infinite;
+}
+@keyframes hyperPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 2px var(--pink);
+  }
+  50% {
+    box-shadow: 0 0 0 2px var(--amber-bright);
+  }
+}
 
 #context-lost-banner {
   display: none;
@@ -1152,19 +1296,27 @@ body.compact-hud #menu-fab {
 }
 
 @media (max-width: 560px) {
+  .hud-panel {
+    top: 6px;
+    padding: 5px 6px 6px;
+    gap: 5px;
+  }
+  .hud-stats {
+    gap: 7px;
+  }
   .hud-value {
     font-size: 15px;
   }
-  .hud-block {
-    padding: 4px 7px;
-    min-width: 0;
+  .hud-stat-timer .hud-value {
+    min-width: 52px;
   }
   .hud-label {
     font-size: 7px;
     letter-spacing: 1px;
   }
-  #expbar-wrap {
-    width: 100%;
+  #active-event-banner {
+    font-size: 10px;
+    padding: 4px 10px;
   }
   .up-card {
     width: 82vw;

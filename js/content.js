@@ -1,69 +1,12 @@
 "use strict";
 
 /* =========================================================
-   CONFIG
+   GAME CONTENT / DATA TABLES
+   =========================================================
+   Every data table the game reads lives here. Tunable NUMBERS live in
+   js/config.js instead (loaded before this file) — this file is the
+   "what exists" layer, config.js is the "how strong is it" layer.
    ========================================================= */
-const CONFIG = {
-  arena: { width: 4200, height: 4200 },
-  player: {
-    baseSpeed: 265,
-    baseHugRadius: 32,
-    baseExpMult: 1,
-    baseLuck: 1,
-  },
-  arcade: { duration: 60 },
-  full: {
-    startTime: 60,
-    maxTimeStart: 60,
-    maxTimeFloor: 9,
-    maxTimeDecayPerSec: 0.018,
-    rewardTau: 130,
-    rewardMinFactor: 0.01,
-    baseTimeReward: 2.2,
-  },
-  combo: {
-    window: 1.55,
-    bonusPerLevel: 0.05,
-    maxBonus: 0.75,
-  },
-  leveling: { baseExp: 12, growth: 1.16 },
-  spawn: {
-    initialCount: 9,
-    maxCount: 100,
-    baseInterval: 1.05,
-    minInterval: 0.22,
-    rampDuration: 220,
-  },
-  bayatBaseSpeed: 118,
-  bayatBaseRadius: 20,
-  // ---- new Bayat ability configs (all tunable in one place) ----
-  boost: {
-    duration: 8,
-  },
-  snowball: {
-    keepDistance: 260, // tries to stay at least this far from the player
-    detectionRange: 620,
-    throwCooldown: 2.6,
-    projectileSpeed: 330,
-    projectileLife: 2.2,
-    slowAmount: 0.4, // 40% slower
-    slowDuration: 3,
-  },
-  bomb: {
-    detectionRange: 560,
-    triggerRadius: 150, // starts arming once this close to the player
-    cancelRadius: 210, // backing off past this cancels the countdown
-    warningDuration: 1.1,
-    criticalDuration: 0.6,
-    explosionRadius: 170,
-    explosionTimeDamage: 5,
-    explosionKnockback: 260,
-    movementSpeedMult: 0.85,
-  },
-  slip: {
-    stunDuration: 0.9,
-  },
-};
 
 /* Among-Us-style fixed color palette for co-op player identity (profile
    screen swatches, remote-player nametags/avatars in multiplayer). Picked
@@ -335,6 +278,163 @@ const BAYAT_TYPES = {
     badgeColor: "#dff6ff",
     turnRate: 3.0,
     jitter: 0.5,
+    slipChance: 0.02,
+  },
+
+  /* ---- "Chaos Update" rare / mini-boss variants — same one base
+     sprite + SpriteTint as every type above, no new art. Low weightBase
+     and a meaningful minDiff keep them feeling like genuine discoveries
+     rather than flooding the normal spawn mix. See CLAUDE.md "Chaos
+     Update" section for the full rundown of each one's hook/mechanic. ---- */
+  runner: {
+    key: "runner",
+    label: "THE RUNNER",
+    miniBoss: true,
+    speedMult: 2.6,
+    sizeMult: 0.9,
+    expMult: 5.5,
+    rewardMult: 6.5,
+    color: "#ff9f40",
+    dark: "#a85a12",
+    weightBase: 0.12,
+    minDiff: 0.15,
+    flee: true,
+    danger: false,
+    glow: true,
+    tintColor: "#ff9f40",
+    tintStrength: 0.62,
+    badge: "≫", // ≫
+    badgeColor: "#ffe0bd",
+    turnRate: 10.5, // extremely twitchy — hardest thing in the game to corner
+    jitter: 3.2,
+    slipChance: 0.02,
+  },
+  tank: {
+    key: "tank",
+    label: "THE TANK",
+    miniBoss: true,
+    speedMult: 0.55,
+    sizeMult: 1.55,
+    expMult: 5,
+    rewardMult: 6,
+    color: "#6b7a99",
+    dark: "#2c3448",
+    weightBase: 0.14,
+    minDiff: 0.2,
+    flee: true,
+    danger: false,
+    glow: false,
+    tintColor: "#6b7a99",
+    tintStrength: 0.68,
+    badge: "▣", // ▣
+    badgeColor: "#c7d0e8",
+    turnRate: 4.5, // slow in a straight line, but juks unpredictably — deceptively hard to pin
+    jitter: 2.6,
+    slipChance: 0.01,
+  },
+  // Periodically "phases" — see Bayat.update()'s ghostType branch and
+  // entities.js's rendering alpha. While phased it can't be hugged at
+  // all (checkHugs skips it) and tools that filter `!n.type.danger`
+  // still see it as a legal target, so pulls just visibly fail to stick.
+  ghost: {
+    key: "ghost",
+    label: "Ghost Bayat",
+    speedMult: 1.3,
+    sizeMult: 1.0,
+    expMult: 3.2,
+    rewardMult: 3.6,
+    color: "#cbb8ff",
+    dark: "#6a5a99",
+    weightBase: 0.1,
+    minDiff: 0.25,
+    flee: true,
+    danger: false,
+    glow: false,
+    ghostType: true,
+    tintColor: "#cbb8ff",
+    tintStrength: 0.55,
+    badge: "◌", // ◌
+    badgeColor: "#e9e0ff",
+    turnRate: 5,
+    jitter: 1.2,
+    slipChance: 0.015,
+  },
+  diamond: {
+    key: "diamond",
+    label: "Diamond Bayat",
+    speedMult: 2.3,
+    sizeMult: 0.8,
+    expMult: 7,
+    rewardMult: 8,
+    color: "#9ff2ff",
+    dark: "#2c9aa8",
+    weightBase: 0.08,
+    minDiff: 0.3,
+    flee: true,
+    danger: false,
+    glow: true,
+    diamondType: true, // triggers its own rare spawn-announcement toast, like golden
+    tintColor: "#9ff2ff",
+    tintStrength: 0.6,
+    badge: "◈", // ◈
+    badgeColor: "#e3fbff",
+    turnRate: 9,
+    jitter: 2.4,
+    slipChance: 0.02,
+  },
+  // Visually identical to `normal` on purpose (same tint) — see
+  // BAYAT_TYPES lookup skip in Bayat.draw() badge logic and the surprise
+  // roll in Game.applyHugReward()'s mimicType branch. It's meant to be
+  // indistinguishable until you've already committed to the hug.
+  mimic: {
+    key: "mimic",
+    label: "Mimic Bayat",
+    speedMult: 1.0,
+    sizeMult: 1.0,
+    expMult: 1.0,
+    rewardMult: 1.0,
+    color: "#c9c2b8",
+    dark: "#6b6258",
+    weightBase: 0.16,
+    minDiff: 0.1,
+    flee: true,
+    danger: false,
+    glow: false,
+    mimicType: true,
+    tintColor: null, // no tint at all — reads as a plain "normal" Bayat
+    tintStrength: 0,
+    badge: "", // deliberately blank, same as `normal` — see comment above
+    badgeColor: "#fff2c2",
+    turnRate: 5.5,
+    jitter: 1.0,
+    slipChance: 0.03,
+  },
+  // Randomly re-rolls its own color/speed every couple seconds — see
+  // Bayat.update()'s chaosType branch. Reward is rolled at hug-time from
+  // a wide random range instead of a fixed rewardMult (set on the
+  // instance, not here — see Bayat constructor).
+  chaos: {
+    key: "chaos",
+    label: "THE CHAOS BAYAT",
+    miniBoss: true,
+    speedMult: 1.4,
+    sizeMult: 1.15,
+    expMult: 6,
+    rewardMult: 6,
+    color: "#ff7ab8",
+    dark: "#5a1f6b",
+    weightBase: 0.07,
+    minDiff: 0.35,
+    flee: true,
+    danger: false,
+    glow: true,
+    chaosType: true,
+    tintColor: "#ff7ab8",
+    tintStrength: 0.6,
+    badge: "✦", // ✦
+    badgeColor: "#ffd9f0",
+    turnRate: 7,
+    jitter: 2.0,
     slipChance: 0.02,
   },
 };
@@ -1008,6 +1108,29 @@ const TOOL_DEFS = [
       `Fires at the FARTHEST Bayat in range instead of the nearest — mops up stragglers.`,
     range: (l) => 900 + l * 90,
   },
+  {
+    id: "tesla",
+    name: "Tesla Coil",
+    icon: "⚡",
+    maxLevel: 5,
+    kind: "aura",
+    tickInterval: CONFIG.tesla.tickInterval,
+    desc: (l) =>
+      `Periodically electrocutes nearby Bayats — lightning chains between ${CONFIG.tesla.chainCount + Math.floor(l / 2)} of them.`,
+    range: (l) => 260 + l * 40,
+  },
+  {
+    id: "timebomb",
+    name: "Time Bomb",
+    icon: "🧨",
+    maxLevel: 5,
+    baseCooldown: 8.5,
+    kind: "telegraph",
+    desc: (l) =>
+      `Drops a bomb that explodes after a delay — big pull + knockback + time drain on Dangerous Bayats caught in it.`,
+    range: (l) => CONFIG.timebomb.explosionRadius + l * 20,
+    telegraphTime: CONFIG.timebomb.fuseDuration,
+  },
 ];
 
 /* Pixel-art icon sprite sheet lookup: id -> [col,row] cell in assets/icons.png
@@ -1074,6 +1197,8 @@ const ICON_SPRITE = {
   balloon: [1, 7],
   duster: [2, 7],
   cupid: [3, 7],
+  tesla: [4, 7],
+  timebomb: [5, 7],
 };
 function iconHTML(id, sizePx, fallbackEmoji) {
   const cell = ICON_SPRITE[id];
@@ -1377,6 +1502,355 @@ function applyChaosReward(reward, player) {
   }
   AudioSystem.levelup();
 }
+
+/* =========================================================
+   RANDOM EVENT SYSTEM — a modular, data-driven table. Game.updateEvents()
+   (game.js) rolls a weighted pick from here every CONFIG.events window;
+   the winning event runs for `duration` seconds as `Game.activeEvent =
+   {def, t, duration}`, and every gameplay hook that cares reads
+   Game.activeEvent.def directly at the point of use rather than this
+   system pushing state around — see each field's comment for where it's
+   read. Adding a new event is just adding an entry here (+ picking which
+   of the existing multiplier fields it sets); nothing else in the loop
+   needs new special-casing. `weight` is relative, doesn't need to sum to
+   anything in particular.
+   ========================================================= */
+const EVENT_POOL = [
+  {
+    id: "bayatrush",
+    name: "BAYAT RUSH",
+    desc: "A huge number of Bayats spawn at once.",
+    weight: 10,
+    duration: 9,
+    color: "#ff9f40",
+    spawnMult: 2.4, // read by BayatManager.update()
+  },
+  {
+    id: "goldenminute",
+    name: "GOLDEN MINUTE",
+    desc: "More Golden & Diamond Bayats, better luck.",
+    weight: 8,
+    duration: 15,
+    color: "#ffd76a",
+    goldenWeightMult: 5, // read by BayatManager.pickType()
+    luckMult: 1.6, // read by BayatManager.pickType() for chest-adjacent luck rolls
+  },
+  {
+    id: "panic",
+    name: "PANIC",
+    desc: "Every Bayat suddenly moves much faster.",
+    weight: 9,
+    duration: 10,
+    color: "#ff5c72",
+    bayatSpeedMult: 1.7, // read by Bayat.effectiveSpeed
+  },
+  {
+    id: "slowmo",
+    name: "SLOW MOTION",
+    desc: "Everything slows down... except you.",
+    weight: 8,
+    duration: 7,
+    color: "#7fd8e8",
+    bayatSpeedMult: 0.35,
+  },
+  {
+    id: "blackout",
+    name: "BLACKOUT",
+    desc: "The arena goes dark except right around you.",
+    weight: 6,
+    duration: 12,
+    color: "#0a0812",
+    darkness: true, // read by Game.drawWorld()
+  },
+  {
+    id: "doublehugevent",
+    name: "DOUBLE HUG",
+    desc: "Every hug gives double the reward.",
+    weight: 9,
+    duration: 10,
+    color: "#ff7ab8",
+    rewardEventMult: 2, // read by Game.applyHugReward()
+  },
+  {
+    id: "chaosmode",
+    name: "CHAOS MODE",
+    desc: "Everything at once. Good luck.",
+    weight: 3, // rarest of the bunch — the "oh no" event
+    duration: 12,
+    color: "#a970ff",
+    spawnMult: 1.7,
+    bayatSpeedMult: 1.3,
+    rewardEventMult: 1.6,
+    goldenWeightMult: 2.5,
+  },
+  {
+    id: "timestop",
+    name: "TIME STOP",
+    desc: "Every Bayat freezes solid. Free hugs.",
+    weight: 4, // strong effect ("free hugs") — kept rarer than the mid-tier events
+    duration: 5,
+    color: "#cdeaff",
+    bayatSpeedMult: 0, // reuses the exact same hook as Panic/Slow Motion — 0x is just the extreme end
+  },
+  {
+    id: "giantmode",
+    name: "GIANT MODE",
+    desc: "You're enormous — huge reach, but slower.",
+    weight: 7,
+    duration: 11,
+    color: "#ffb6d9",
+    playerScaleEventMult: 1.9, // read by Player.draw() (visual) and Player.hugRadius
+    playerSpeedEventMult: 0.75, // read by Player.speed — the trade-off
+  },
+  {
+    id: "magnetstorm",
+    name: "MAGNET STORM",
+    desc: "Every Bayat is pulled steadily toward you.",
+    weight: 7,
+    duration: 9,
+    color: "#a970ff",
+    globalPull: true, // read by Game.updateEvents() — applies a steady pull each frame
+  },
+  {
+    id: "reverseworld",
+    name: "REVERSE WORLD",
+    desc: "Your controls are inverted. Good luck.",
+    weight: 5,
+    duration: 8,
+    color: "#ff5c72",
+    invertControls: true, // read by Player.update()
+  },
+];
+
+/* =========================================================
+   CURSED ITEMS — rare, high-risk/high-reward chest rewards, distinct
+   from a normal STAT_UPGRADES pick: always a big upside PAIRED with a
+   real downside, never a pure buff. Granted instead of a chest's normal
+   picks with CONFIG.cursedChest.chance — see Game.onChestOpened(). Like
+   BOOST_POOL, these use Game.tempEffects... except cursed items last the
+   REST OF THE RUN (duration: Infinity), showing up in the Inventory
+   "Temp Effects" tab as a permanent-this-run entry rather than a
+   countdown.
+   ========================================================= */
+const CURSED_ITEMS = [
+  {
+    id: "cursedspeed",
+    name: "Cursed Speed",
+    icon: "👟",
+    desc: "+100% move speed, but -50% hug range.",
+    apply: (p) => {
+      p.speedMult *= 2;
+      p.hugRadiusMult *= 0.5;
+    },
+    revert: (p) => {
+      p.speedMult /= 2;
+      p.hugRadiusMult /= 0.5;
+    },
+  },
+  {
+    id: "bloodclock",
+    name: "Blood Clock",
+    icon: "⏰",
+    desc: "Hugs give 2.5x time, but your timer drains 40% faster.",
+    apply: (p) => {
+      p.warmHugsMult = (p.warmHugsMult || 1) * 2.5;
+      p.bloodClockDrainMult = 1.4;
+    },
+    revert: (p) => {
+      p.warmHugsMult = (p.warmHugsMult || 1) / 2.5;
+      p.bloodClockDrainMult = 1;
+    },
+  },
+  {
+    id: "glasshands",
+    name: "Glass Hands",
+    icon: "💎",
+    desc: "+120% hug radius, but Dangerous Bayats cost 3x the time.",
+    apply: (p) => {
+      p.hugRadiusMult *= 2.2;
+      p.glassHandsDangerMult = 3;
+    },
+    revert: (p) => {
+      p.hugRadiusMult /= 2.2;
+      p.glassHandsDangerMult = 1;
+    },
+  },
+  {
+    id: "chaosmagnet",
+    name: "Chaos Magnet",
+    icon: "🧲",
+    desc: "Huge pickup range, but Bayats spawn 60% faster.",
+    apply: (p) => {
+      p.magnetLevel = (p.magnetLevel || 0) + 6;
+      p.curseSpawnMult = (p.curseSpawnMult || 1) * 1.6;
+    },
+    revert: (p) => {
+      p.magnetLevel = Math.max(0, (p.magnetLevel || 0) - 6);
+      p.curseSpawnMult = (p.curseSpawnMult || 1) / 1.6;
+    },
+  },
+];
+
+/* =========================================================
+   ARENA MODIFIERS — an optional per-run wildcard, rolled once in
+   Game.rollRunModifier() (startGame()) and stored as Game.runModifier
+   for the rest of the run. `chance` is the odds THIS SPECIFIC modifier
+   wins the roll if a modifier happens at all — see rollRunModifier()'s
+   own comment for the "does one happen" gate. Every field here is read
+   live by the same hook points CONFIG.hyperMode/EVENT_POOL already use
+   (bayatSpeedMult in Bayat.effectiveSpeed, rewardMult in
+   applyHugReward, etc) rather than each modifier inventing its own.
+   ========================================================= */
+const ARENA_MODIFIERS = [
+  {
+    id: "fastworld",
+    name: "Fast World",
+    desc: "Everything moves faster — you included.",
+    weight: 10,
+    bayatSpeedMult: 1.35,
+    playerSpeedRunMult: 1.25,
+  },
+  {
+    id: "tinyworld",
+    name: "Tiny World",
+    desc: "Everyone is smaller and quicker to lose track of.",
+    weight: 8,
+    bayatSizeMult: 0.7,
+  },
+  {
+    id: "richworld",
+    name: "Rich World",
+    desc: "+50% EXP and time from every hug.",
+    weight: 10,
+    rewardMult: 1.5,
+  },
+  {
+    id: "dangerousworld",
+    name: "Dangerous World",
+    desc: "Dangerous Bayats show up much more often.",
+    weight: 8,
+    dangerWeightMult: 2.4,
+  },
+  {
+    id: "infinitecombo",
+    name: "Infinite Combo",
+    desc: "Your combo never decays on its own this run.",
+    weight: 7,
+    infiniteCombo: true,
+  },
+  {
+    id: "nochests",
+    name: "No Chests",
+    desc: "No chests spawn — Bayats reward much more instead.",
+    weight: 7,
+    noChests: true,
+    rewardMult: 1.6,
+  },
+];
+
+/* =========================================================
+   WORLD PICKUPS — small ground items that spawn periodically and
+   auto-collect on proximity (CONFIG.pickups), independent of chests and
+   Bayats entirely. Reuses existing ICON_SPRITE entries for the DOM/
+   inventory-adjacent bits, but is actually drawn on canvas as a simple
+   colored pixel diamond (drawPickup() in render-helpers.js) rather than
+   pulling the icon sheet onto canvas — see that function's comment.
+   Game.collectPickup() (game.js) is where each field below actually
+   gets applied; add a new pickup by adding an entry here + one branch
+   there.
+   ========================================================= */
+const PICKUP_DEFS = [
+  {
+    id: "timeshard",
+    name: "Time Shard",
+    icon: "timepocket",
+    color: "#6fe3a3",
+    weight: 12,
+    timeValue: 1.5,
+  },
+  {
+    id: "megatimeshard",
+    name: "Mega Time Shard",
+    icon: "timepocket",
+    color: "#ffd76a",
+    weight: 2,
+    timeValue: 10,
+  },
+  {
+    id: "xpcrystal",
+    name: "XP Crystal",
+    icon: "amulet",
+    color: "#a970ff",
+    weight: 12,
+    expValue: 40,
+  },
+  {
+    id: "comboorb",
+    name: "Combo Orb",
+    icon: "megahug",
+    color: "#ff7ab8",
+    weight: 6,
+    comboBoost: 6,
+  },
+  {
+    id: "luckorb",
+    name: "Luck Orb",
+    icon: "clover",
+    color: "#7fd8e8",
+    weight: 6,
+    luckBuffDuration: 14,
+  },
+  {
+    id: "mysteryorb",
+    name: "Mystery Orb",
+    icon: "blackhole",
+    color: "#cbb8ff",
+    weight: 8,
+    mystery: true,
+  },
+  {
+    id: "chaosorb",
+    name: "Chaos Orb",
+    icon: "goldenaura",
+    color: "#ff5c72",
+    weight: 3,
+    triggerEvent: true,
+  },
+];
+
+/* =========================================================
+   ACHIEVEMENTS — persistent, cross-run unlocks (SaveSystem-backed, see
+   SaveSystem.getUnlockedAchievements()/unlockAchievement()). Checked via
+   Game.checkAchievement(id) sprinkled at the relevant moment in whatever
+   system owns that moment (see each id's comment below for where).
+   `hidden:true` entries show "???" in the achievements screen until
+   unlocked — everything else shows its real name/desc always, locked or
+   not, so players know what to aim for.
+   ========================================================= */
+const ACHIEVEMENTS = [
+  { id: "firsthug", name: "First Hug", desc: "Hug your first Bayat.", icon: "warmhugs" },
+  { id: "hug100", name: "Professional Hugger", desc: "Hug 100 Bayats total (across all runs).", icon: "warmhugs" },
+  { id: "hug1000", name: "Hug Apocalypse", desc: "Hug 1,000 Bayats total (across all runs).", icon: "megahug" },
+  { id: "manybayats", name: "WHY ARE THERE SO MANY?", desc: "Have 60+ Bayats alive on screen at once.", icon: "goldenaura" },
+  { id: "bombhit", name: "OH NO", desc: "Get caught by a Bomb Bayat's explosion.", icon: "firecracker" },
+  { id: "snowhit", name: "Snow Problem", desc: "Get hit by a Snowball Bayat.", icon: "snowball" },
+  { id: "slips10", name: "Slippery Situation", desc: "Watch 10 Bayats slip in a single run.", icon: "shoes" },
+  { id: "chaosevent", name: "Maximum Chaos", desc: "Trigger CHAOS MODE.", icon: "goldenaura" },
+  { id: "jumpscare", name: "Mr. Squeeze?!", desc: "Survive a jumpscare from Mr. Squeeze.", icon: "boldhugs", hidden: true },
+  { id: "goldenjumpscare", name: "Golden Squeeze", desc: "Get the ultra-rare Golden Mr. Squeeze visit.", icon: "goldenaura", hidden: true },
+  { id: "goldenhug", name: "Golden Hug", desc: "Hug a Golden Bayat.", icon: "megahug" },
+  { id: "diamondhug", name: "Diamond in the Rough", desc: "Hug a Diamond Bayat.", icon: "gem" },
+  { id: "miniboss", name: "Boss Hugger", desc: "Hug a mini-boss Bayat (Runner, Tank, or Chaos).", icon: "thickskin" },
+  { id: "ghosthug", name: "Gotcha, Ghost", desc: "Hug a Ghost Bayat while it's solid.", icon: "clover" },
+  { id: "mimicjackpot", name: "Sneaky Sneaky", desc: "Hit the jackpot on a Mimic Bayat.", icon: "gem", hidden: true },
+  { id: "hyperhug", name: "HYPER HUG MODE", desc: "Reach x100 combo and trigger Hyper Hug Mode.", icon: "goldenaura" },
+  { id: "combo50", name: "Unstoppable", desc: "Reach a x50 combo.", icon: "megahug" },
+  { id: "cursed", name: "Deal With The Devil", desc: "Take a Cursed Item from a chest.", icon: "boldhugs" },
+  { id: "legendarychest", name: "Jackpot", desc: "Open a Legendary chest.", icon: "gem" },
+  { id: "allarenas", name: "Bayat Collector", desc: "Unlock every arena.", icon: "clover" },
+  { id: "guardiansave", name: "So Close", desc: "Get saved by Guardian Hug.", icon: "guardianhug" },
+  { id: "downedrevive", name: "I've Got You", desc: "Revive a downed teammate in co-op.", icon: "adrenaline" },
+];
 
 /* =========================================================
    ARENAS — each arena swaps background/decor/atmosphere and

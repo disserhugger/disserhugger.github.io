@@ -40,6 +40,9 @@
           <button class="btn" data-action="show-coop">
             ▶ Co-op<br /><small>hug Bayats together, peer-to-peer</small>
           </button>
+          <button class="btn" data-action="show-achievements">
+            🏆 Achievements
+          </button>
           <button class="btn" data-action="show-htp">How To Play</button>
           <button class="btn" data-action="show-settings">Settings</button>
         </div>
@@ -126,6 +129,18 @@
         </div>
       </div>
 
+      <!-- ACHIEVEMENTS -->
+      <div id="screen-achievements" class="screen hidden">
+        <div class="panel" style="width: min(640px, 92vw); text-align: left">
+          <h2>Achievements</h2>
+          <div class="ach-progress" id="ach-progress"></div>
+          <div class="arena-list" id="achievements-list"></div>
+          <div style="margin-top: 16px; display: flex; justify-content: center">
+            <button class="btn ghost" data-action="back-menu">Back</button>
+          </div>
+        </div>
+      </div>
+
       <!-- CO-OP: profile (username + color) -->
       <div id="screen-mp-profile" class="screen hidden">
         <div class="panel" style="width: min(420px, 92vw)">
@@ -180,6 +195,7 @@
             </button>
             <button class="btn ghost" data-action="back-menu">Back</button>
           </div>
+
         </div>
       </div>
 
@@ -195,6 +211,9 @@
             </button>
           </div>
           <div id="mp-peer-list"></div>
+          <!-- Live connection diagnostics — see CONFIG.coop.debug. Turns
+               "co-op randomly doesn't work" into something you can read. -->
+          <div id="mp-conn-status"></div>
           <div class="menu-stack" style="margin-top: 16px">
             <button
               class="btn primary hidden"
@@ -283,33 +302,44 @@
         </div>
       </div>
 
-      <!-- HUD -->
+      <!-- HUD — one cohesive top panel (stats + EXP bar share a single
+           bordered container) so nothing floats disconnected or overlaps.
+           The active-event banner sits BELOW this panel, never on top of
+           the EXP label like it used to. -->
       <div id="hud">
-        <div class="hud-topbar">
-          <div class="hud-top">
-            <div class="hud-stat-group">
-              <div class="hud-block">
-                <div class="hud-label" id="timer-label">TIME</div>
-                <div class="hud-value timer" id="hud-timer">60.0</div>
-              </div>
-              <div class="hud-block">
-                <div class="hud-label" id="secondary-label">HUGS</div>
-                <div class="hud-value" id="hud-secondary">0</div>
-              </div>
-              <div class="hud-block">
-                <div class="hud-label">COMBO</div>
-                <div class="hud-value combo" id="hud-combo">x1</div>
-              </div>
+        <div class="hud-panel">
+          <div class="hud-stats">
+            <div class="hud-stat hud-stat-timer">
+              <span class="hud-label" id="timer-label">TIME</span>
+              <span class="hud-value timer" id="hud-timer">60.0</span>
             </div>
-            <div class="hud-block" id="pause-hint" data-action="pause">
-              <div class="hud-label">LEVEL</div>
-              <div class="hud-value" id="hud-level">1</div>
+            <div class="hud-sep"></div>
+            <div class="hud-stat">
+              <span class="hud-label" id="secondary-label">HUGS</span>
+              <span class="hud-value" id="hud-secondary">0</span>
+            </div>
+            <div class="hud-sep"></div>
+            <div class="hud-stat">
+              <span class="hud-label">COMBO</span>
+              <span class="hud-value combo" id="hud-combo">x1</span>
+            </div>
+            <div class="hud-spacer"></div>
+            <div class="hud-stat hud-stat-level" id="pause-hint" data-action="pause">
+              <span class="hud-label">LEVEL</span>
+              <span class="hud-value" id="hud-level">1</span>
             </div>
           </div>
           <div id="expbar-wrap">
-            <div id="expbar-bg"><div id="expbar-fill"></div></div>
-            <div id="level-label">EXP</div>
+            <div id="expbar-bg">
+              <div id="expbar-fill"></div>
+              <div id="level-label">EXP</div>
+            </div>
           </div>
+          <!-- Lives INSIDE the panel's flow so it can never overlap the
+               EXP bar no matter how the panel is resized — the old
+               absolutely-positioned version needed a hand-tuned `top`
+               that silently broke every time the panel's height changed. -->
+          <div id="active-event-banner" class="hidden"></div>
         </div>
         <div class="hud-bottom-left" id="tool-tray"></div>
         <div id="menu-fab" data-action="pause">
@@ -390,6 +420,10 @@
       </div>
     </div>
 
+    <!-- config.js MUST load first — it defines ASSETS/CONFIG that every
+         other file reads at load time (core.js kicks off asset loading
+         immediately, content.js's data tables reference CONFIG values). -->
+    <script src="js/config.js"></script>
     <script src="js/core.js"></script>
     <script src="js/content.js"></script>
     <script src="js/save-audio.js"></script>

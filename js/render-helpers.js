@@ -284,6 +284,9 @@ function generateZones(arena) {
 }
 function drawDecor(ctx, cam, decor) {
   for (const d of decor) {
+    // Destructible decor (rock/crystal — see Game.updateDestructibles()):
+    // once broken it's just gone, no rubble sprite to keep drawing.
+    if (d.broken) continue;
     const sx = d.x - cam.x,
       sy = d.y - cam.y;
     if (sx < -40 || sx > cam.w + 40 || sy < -40 || sy > cam.h + 40) continue;
@@ -435,5 +438,219 @@ function drawRemotePlayer(ctx, cam, puppet) {
   ctx.fillText(label, sx + 1, sy - radius - 9);
   ctx.fillStyle = puppet.downed ? "#ff8a8a" : "#fff";
   ctx.fillText(label, sx, sy - radius - 10);
+  ctx.restore();
+}
+
+/* =========================================================
+   WORLD PICKUPS — drawn as a simple bobbing pixel diamond rather than
+   pulling the icons.png DOM sprite sheet onto canvas (that sheet was
+   never loaded as a Sprites entry, and adding a second image-loading
+   path just for this felt like more machinery than a small ground item
+   needs) — see PICKUP_DEFS in content.js.
+   ========================================================= */
+function drawPickup(ctx, cam, p) {
+  const sx = p.x - cam.x,
+    sy = p.y - cam.y + Math.sin(p.bob) * 4;
+  if (sx < -30 || sx > cam.w + 30 || sy < -30 || sy > cam.h + 30) return;
+  ctx.save();
+  ctx.translate(sx, sy);
+  ctx.shadowColor = p.def.color;
+  ctx.shadowBlur = 12;
+  const s = 9 + Math.sin(p.bob * 1.3) * 1.5;
+  ctx.fillStyle = p.def.color;
+  ctx.beginPath();
+  ctx.moveTo(0, -s);
+  ctx.lineTo(s * 0.75, 0);
+  ctx.lineTo(0, s);
+  ctx.lineTo(-s * 0.75, 0);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = "rgba(20,14,32,.6)";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.fillStyle = "rgba(255,255,255,.55)";
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.15, -s * 0.5);
+  ctx.lineTo(s * 0.1, -s * 0.1);
+  ctx.lineTo(-s * 0.3, -s * 0.05);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+/* =========================================================
+   JUMPSCARE MASCOT — "Mr. Squeeze". An ORIGINAL character invented for
+   this game (not a reproduction of any existing copyrighted mascot) —
+   the joke is that in a game about hugging, the one thing that hugs YOU
+   is the scary part. Drawn as a real, swappable image asset
+   (assets/jumpscare.png, loaded via the usual ASSETS/Sprites pattern in
+   core.js — change how the jumpscare looks by replacing that file, no
+   code edit needed) with the SAME quantized pop-in scale + jitter either
+   way; if the sprite fails to load, drawJumpscareProcedural() below
+   (the original hand-coded-primitives version) is the fallback, exactly
+   like every other sprite in this project degrades gracefully. Drawn in
+   screen space (ignores the camera, like the HUD) either way.
+   ========================================================= */
+// `videoReady` is Game.jumpscareVideoReady — false while the rewind seek
+// is still in flight, during which the <video> element would hand us the
+// PREVIOUS playthrough's last frame. We paint plain black for those few
+// frames instead; see Game.triggerJumpscare()'s comment.
+function drawJumpscareOverlay(ctx, cam, t, totalDuration, golden, videoReady) {
+  const progress = clamp(1 - t / totalDuration, 0, 1);
+  const scale = 0.7 + quantize(Math.min(1, progress * 3), 4) * 0.3;
+  const cx = cam.w / 2,
+    cy = cam.h * 0.56;
+  const W = Math.min(cam.w, cam.h) * 0.62;
+  const jitterX = golden ? 0 : Math.sin(performance.now() / 35) * 4;
+  // Priority: VIDEO (if configured + loaded) > PNG > procedural drawing.
+  // The video is drawn onto the game canvas like any other image source,
+  // so it lives inside the game's own rendering rather than being a DOM
+  // overlay — that keeps the CRT/scanline layer and screen flash on top
+  // of it, and means it can't survive a state change that stops drawing.
+  if (Videos.jumpscareLoaded && Videos.jumpscare) {
+    if (!videoReady) {
+      // Rewind still in flight — black, not a stale frame from last time.
+      ctx.save();
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, cam.w, cam.h);
+      ctx.restore();
+      return;
+    }
+    ctx.save();
+    // A video jumpscare goes FULLSCREEN (unlike the PNG mascot, which is
+    // a centered character) — that's the look people expect from one, and
+    // it sidesteps having to crop an arbitrary-aspect clip into a square
+    // box (which would slice the sides off a 4:3 face). Scaled to COVER
+    // the whole canvas: preserves aspect ratio, overflows the short axis,
+    // never letterboxes and never stretches.
+    const vw = Videos.jumpscare.videoWidth || 16;
+    const vh = Videos.jumpscare.videoHeight || 9;
+    // The shared `scale` above starts at 0.7 (a stepped pop-in that suits
+    // the PNG mascot, which is a centered character). Applying that to a
+    // fullscreen video would shrink it BELOW full coverage and letterbox
+    // it — so instead the video punches IN from 1.12x and settles to
+    // exactly 1.0x, which reads as the same "slam into frame" beat while
+    // never exposing an edge. Quantized, per the animation conventions.
+    const punch = 1 + (1 - scale) * 0.4; // scale 0.7 -> 1.12, scale 1.0 -> 1.0
+    const coverScale = Math.max(cam.w / vw, cam.h / vh) * punch;
+    const dw = vw * coverScale,
+      dh = vh * coverScale;
+    // Black backdrop — belt-and-braces so the arena can never show
+    // through even if a frame is somehow undersized.
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, cam.w, cam.h);
+    ctx.translate(cam.w / 2 + jitterX, cam.h / 2);
+    if (golden) {
+      ctx.shadowColor = "#ffd76a";
+      ctx.shadowBlur = 40;
+    }
+    try {
+      ctx.drawImage(Videos.jumpscare, -dw / 2, -dh / 2, dw, dh);
+      // Golden variant: a gentle warm wash over the footage, since
+      // SpriteTint can't be used here (it caches a one-off recolor of a
+      // STATIC image; a video is a new frame every tick, so a per-frame
+      // composite is the only option).
+      // Deliberately a low-alpha plain source-over fill, NOT an "overlay"
+      // blend — overlay massively amplifies contrast, which turned a
+      // noisy/static video frame into an illegible gold mess. Keep this
+      // subtle: the gold glow around the edges does most of the work.
+      if (golden) {
+        ctx.globalAlpha = 0.2;
+        ctx.fillStyle = "#ffd76a";
+        ctx.fillRect(-dw / 2, -dh / 2, dw, dh);
+        ctx.globalAlpha = 1;
+      }
+      ctx.restore();
+      return;
+    } catch (e) {
+      // Frame not decodable yet (or the element went bad) — fall through
+      // to the PNG/procedural path rather than dropping the whole scare.
+      ctx.restore();
+    }
+  }
+  if (Sprites.jumpscareLoaded) {
+    ctx.save();
+    ctx.translate(cx + jitterX, cy);
+    ctx.scale(scale, scale);
+    ctx.imageSmoothingEnabled = false;
+    // Golden variant: alpha-safe tint toward gold, same SpriteTint system
+    // every other recolor in this game uses — never ctx.filter (see
+    // CLAUDE.md "SpriteTint" for why: transparent-edge color fringing).
+    const sprite = golden
+      ? SpriteTint.getTinted("jumpscare", "#ffd76a", 0.6) || Sprites.jumpscare
+      : Sprites.jumpscare;
+    const size = W * 1.9;
+    if (golden) {
+      ctx.shadowColor = "#ffd76a";
+      ctx.shadowBlur = 30;
+    }
+    ctx.drawImage(sprite, -size / 2, -size / 2, size, size);
+    ctx.restore();
+    return;
+  }
+  drawJumpscareProcedural(ctx, cx + jitterX, cy, W, scale, golden);
+}
+function drawJumpscareProcedural(ctx, cx, cy, W, scale, golden) {
+  const bodyColor = golden ? "#ffd76a" : "#3a1030";
+  const darkColor = golden ? "#a8791a" : "#150410";
+  const eyeGlow = golden ? "#fff8e0" : "#ffffff";
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(scale, scale);
+  // body (big rounded blob, arms reaching wide — "wants to hug you")
+  ctx.fillStyle = darkColor;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, W * 0.56, W * 0.5, 0, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = bodyColor;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, W * 0.5, W * 0.44, 0, 0, TAU);
+  ctx.fill();
+  // arms
+  ctx.fillStyle = bodyColor;
+  ctx.beginPath();
+  ctx.ellipse(-W * 0.62, W * 0.05, W * 0.22, W * 0.13, -0.4, 0, TAU);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(W * 0.62, W * 0.05, W * 0.22, W * 0.13, 0.4, 0, TAU);
+  ctx.fill();
+  // eyes — huge, white, tiny dark pupils that dart
+  const eyeDX = Math.sin(performance.now() / 90) * W * 0.02;
+  for (const side of [-1, 1]) {
+    ctx.fillStyle = eyeGlow;
+    ctx.beginPath();
+    ctx.ellipse(side * W * 0.22, -W * 0.08, W * 0.15, W * 0.17, 0, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = "#0a0510";
+    ctx.beginPath();
+    ctx.ellipse(
+      side * W * 0.22 + eyeDX,
+      -W * 0.06,
+      W * 0.055,
+      W * 0.065,
+      0,
+      0,
+      TAU,
+    );
+    ctx.fill();
+  }
+  // wide jagged grin
+  ctx.fillStyle = "#0a0510";
+  ctx.beginPath();
+  ctx.moveTo(-W * 0.3, W * 0.16);
+  ctx.quadraticCurveTo(0, W * 0.34, W * 0.3, W * 0.16);
+  ctx.quadraticCurveTo(0, W * 0.24, -W * 0.3, W * 0.16);
+  ctx.fill();
+  ctx.fillStyle = "#fff";
+  const teeth = 7;
+  for (let i = 0; i < teeth; i++) {
+    const tx = -W * 0.26 + (i / (teeth - 1)) * W * 0.52;
+    ctx.beginPath();
+    ctx.moveTo(tx - W * 0.03, W * 0.17);
+    ctx.lineTo(tx + W * 0.03, W * 0.17);
+    ctx.lineTo(tx, W * 0.24);
+    ctx.closePath();
+    ctx.fill();
+  }
   ctx.restore();
 }

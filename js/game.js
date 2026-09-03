@@ -47,6 +47,29 @@ const Game = {
   levelUpQueue: [],
   selectedArenaId: "meadow",
   arena: null,
+  // ---- Chaos Update: combo milestones + Hyper Hug Mode ----
+  comboMilestonesHit: {}, // {5:true, 10:true, ...} — each fires once per run
+  hyperModeT: 0, // seconds remaining; >0 means Hyper Hug Mode is active
+  hyperModeHitThisRun: false, // for the "reach Hyper Hug Mode" achievement
+  get hyperModeActive() {
+    return this.hyperModeT > 0;
+  },
+  // ---- Chaos Update: random events ----
+  activeEvent: null, // {def, t, duration} or null
+  eventTimer: 0, // countdown to the next roll attempt
+  eventsTriggeredThisRun: [], // event names, for the results screen
+  // ---- Chaos Update: rare jumpscare ----
+  jumpscareT: 0, // >0 while the mascot is on screen/gameplay is frozen for it
+  jumpscareGolden: false,
+  jumpscareOutcomeText: "",
+  // ---- Chaos Update: field pickups (world items, not chest-based) ----
+  pickups: [],
+  pickupSpawnTimer: 0,
+  // ---- Chaos Update: this run's arena modifier (rolled at startGame) ----
+  runModifier: null,
+  // ---- Chaos Update: achievements unlocked THIS run, for the results screen ----
+  achievementsThisRun: [],
+  cursedItemsTaken: {}, // CURSED_ITEMS ids already granted this run — see grantCursedItem()
   // ---- Co-op multiplayer (see CLAUDE.md "Multiplayer" section) ----
   mpProfile: null, // {name, color} for THIS session, loaded from/saved to SaveSystem
   mpInLobby: false,
@@ -153,6 +176,14 @@ const Game = {
       if (k === "escape" || k === "p") {
         if (this.state === "playing") this.pause();
         else if (this.state === "paused") this.resumeGame();
+      }
+      // Test hotkey for the rare jumpscare (see CLAUDE.md "Chaos Update"
+      // — "Mr. Squeeze") — bypasses the per-second random roll entirely
+      // so it doesn't require sitting around waiting for it. Plain J for
+      // a normal roll, Shift+J forces the rare Golden variant specifically,
+      // since that's only 5% of scares and otherwise a pain to test.
+      if (k === "j" && this.state === "playing" && this.jumpscareT <= 0) {
+        this.triggerJumpscare(e.shiftKey ? true : undefined);
       }
     });
     window.addEventListener("keyup", (e) => {
@@ -301,6 +332,10 @@ const Game = {
             UI.renderArenaSelect();
             UI.showScreen("screen-arena");
             break;
+          case "show-achievements":
+            UI.renderAchievements();
+            UI.showScreen("screen-achievements");
+            break;
           case "show-coop":
             this.mpEnterFlow();
             break;
@@ -410,7 +445,34 @@ const Game = {
   mpAvailable() {
     return typeof Multiplayer !== "undefined";
   },
+  /* Resolves the relay URL at runtime, so you never have to edit
+     config.js and redeploy just to change it. Priority:
+
+       1. ?relay=wss://...  in the page URL — highest priority, and
+          shareable: send friends a link with it baked in and they need
+          to configure nothing at all.
+       2. whatever was saved last (localStorage, via SaveSystem).
+       3. CONFIG.coop.relayUrl — the committed default.
+
+     This matters most for Cloudflare Quick Tunnels, whose URL changes
+     every restart: paste the new one once (or share a link) instead of
+     re-deploying the site each session. */
+  mpResolveRelayUrl() {
+    let fromQuery = null;
+    try {
+      fromQuery = new URLSearchParams(location.search).get("relay");
+    } catch (e) {}
+    if (fromQuery) {
+      const cleaned = fromQuery.trim();
+      SaveSystem.setRelayUrl(cleaned); // remember it for next launch
+      CONFIG.coop.relayUrl = cleaned;
+      return;
+    }
+    const saved = SaveSystem.getRelayUrl();
+    if (saved) CONFIG.coop.relayUrl = saved;
+  },
   mpEnterFlow() {
+    this.mpResolveRelayUrl();
     if (!this.mpAvailable()) {
       UI.toast(
         "Co-op needs the game running from a web server (http/https) — it won't work opened as a local file.",
@@ -478,6 +540,21 @@ const Game = {
     UI.renderMpPeerList(Multiplayer.peers, this.mpProfile, Multiplayer.isHost);
     UI.els["mp-start-btn"].classList.toggle("hidden", !Multiplayer.isHost);
   },
+  // Ticks the lobby's live connection readout once a second while you're
+  // sitting in it. Peer joins/leaves already re-render on their own
+  // (mpBindRoomCallbacks); this exists so the relay counter updates too,
+  // which is what tells you whether signaling is actually up yet.
+  mpStartLobbyPolling() {
+    this.mpStopLobbyPolling();
+    this._mpLobbyTimer = setInterval(() => {
+      if (!this.mpInLobby) return this.mpStopLobbyPolling();
+      UI.renderMpConnStatus();
+    }, 1000);
+  },
+  mpStopLobbyPolling() {
+    if (this._mpLobbyTimer) clearInterval(this._mpLobbyTimer);
+    this._mpLobbyTimer = null;
+  },
   async mpStartHost() {
     if (!this.mpProfile) {
       UI.toast("Set a name and color first.", 2000);
@@ -498,6 +575,7 @@ const Game = {
     this.mpInLobby = true;
     UI.els["mp-room-code"].textContent = code;
     this.mpRefreshLobby();
+    this.mpStartLobbyPolling();
     UI.showScreen("screen-mp-lobby");
   },
   async mpStartJoin() {
@@ -526,6 +604,7 @@ const Game = {
     this.mpInLobby = true;
     UI.els["mp-room-code"].textContent = code;
     this.mpRefreshLobby();
+    this.mpStartLobbyPolling();
     UI.showScreen("screen-mp-lobby");
   },
   mpCopyCode() {
@@ -545,6 +624,7 @@ const Game = {
     }
   },
   mpLeaveLobby() {
+    this.mpStopLobbyPolling();
     try {
       if (this.mpAvailable()) Multiplayer.leave();
     } catch (e) {
@@ -568,6 +648,7 @@ const Game = {
     this.mpBeginCoopRun(data.arenaId);
   },
   mpBeginCoopRun(arenaId) {
+    this.mpStopLobbyPolling();
     this.mpInLobby = false;
     this.coop = true;
     if (ARENAS.some((a) => a.id === arenaId)) this.selectedArenaId = arenaId;
@@ -605,7 +686,7 @@ const Game = {
   mpUpdateNetworking(dt) {
     this.mpNetTimer -= dt;
     if (this.mpNetTimer <= 0) {
-      this.mpNetTimer = 1 / 12;
+      this.mpNetTimer = 1 / CONFIG.coop.playerStateHz;
       Multiplayer.send("playerState", {
         x: Math.round(this.player.x),
         y: Math.round(this.player.y),
@@ -616,7 +697,7 @@ const Game = {
     if (Multiplayer.isHost) {
       this.mpBayatNetTimer -= dt;
       if (this.mpBayatNetTimer <= 0) {
-        this.mpBayatNetTimer = 1 / 8;
+        this.mpBayatNetTimer = 1 / CONFIG.coop.bayatSnapshotHz;
         const list = this.bayats.list
           .filter((n) => n.alive)
           .map((n) => ({
@@ -791,7 +872,7 @@ const Game = {
     if (!this.coop || !this.player.downed) return;
     this.player.downed = false;
     this.player.downedFlashT = 0.6;
-    const reviveFraction = 0.4;
+    const reviveFraction = CONFIG.coop.reviveTimeFraction;
     this.timer = clamp(
       this.maxStoredTime * reviveFraction,
       0,
@@ -815,9 +896,11 @@ const Game = {
     for (const id in this.mpPeers) {
       const p = this.mpPeers[id];
       if (!p.downed || p._reviveSent) continue;
-      if (dist2(this.player.x, this.player.y, p.x, p.y) < 46 * 46) {
+      if (dist2(this.player.x, this.player.y, p.x, p.y) <
+        CONFIG.coop.reviveRadius * CONFIG.coop.reviveRadius) {
         this.player.medkits--;
         p._reviveSent = true;
+        this.checkAchievement("downedrevive");
         Multiplayer.send("revive", {}, id);
         UI.toast("Reviving " + p.name + "...", 1600);
         this.particles.burst(p.x, p.y, "#9adfff", 18, {
@@ -864,6 +947,23 @@ const Game = {
     this.maxCombo = 0;
     this.lastHugTime = -99;
     this.nextMilestone = 25;
+    // ---- Chaos Update per-run resets ----
+    this.comboMilestonesHit = {};
+    this.hyperModeT = 0;
+    this.hyperModeHitThisRun = false;
+    this.activeEvent = null;
+    this.eventTimer = CONFIG.events.firstDelay;
+    this.eventsTriggeredThisRun = [];
+    this.jumpscareT = 0;
+    this.jumpscareGolden = false;
+    this.stopJumpscareMedia(); // a new run must never inherit a scare in progress
+    this.pickups = [];
+    this.pickupSpawnTimer = CONFIG.pickups.spawnInterval * 0.5;
+    this.runAchievementFlags = {}; // per-run flags some achievements need (e.g. "watched 10 slips")
+    this.slipsWatched = 0;
+    this.achievementsThisRun = [];
+    this.cursedItemsTaken = {};
+    this.rollRunModifier();
     this.timer =
       mode === "arcade" ? CONFIG.arcade.duration : CONFIG.full.startTime;
     this.maxStoredTime = CONFIG.full.maxTimeStart;
@@ -874,6 +974,24 @@ const Game = {
     UI.els["hud"].classList.add("active");
     this.state = "playing";
     this.lastFrame = performance.now();
+  },
+  // 40% of runs get a random ARENA_MODIFIERS wildcard; the rest are
+  // plain. Rolled once here, read live everywhere else via
+  // Game.runModifier — see each field's use for exact hook points.
+  rollRunModifier() {
+    if (Math.random() < 0.6) {
+      this.runModifier = null;
+      return;
+    }
+    this.runModifier = weightedPick(
+      ARENA_MODIFIERS.map((m) => ({ item: m, weight: m.weight })),
+    );
+    if (this.runModifier) {
+      UI.toast(
+        "⚡ " + this.runModifier.name + ": " + this.runModifier.desc,
+        3400,
+      );
+    }
   },
   pause() {
     if (this.state !== "playing") return;
@@ -891,6 +1009,9 @@ const Game = {
     this.state = "menu";
     UI.els["hud"].classList.remove("active");
     UI.hideUpgradeModal();
+    UI.updateActiveEventBanner(false, null);
+    this.jumpscareT = 0;
+    this.stopJumpscareMedia();
     UI.updateMenuStats();
     UI.showScreen("screen-menu");
     if (this.coop) this.mpEndCoopSession();
@@ -902,6 +1023,7 @@ const Game = {
   // the results screen still needs this.coop/this.mpPeers intact so co-op
   // stats/labels render correctly (see UI.showResults).
   mpEndCoopSession() {
+    this.mpStopLobbyPolling();
     try {
       if (this.mpAvailable()) Multiplayer.leave();
     } catch (e) {
@@ -923,6 +1045,13 @@ const Game = {
   onGoldenEvent() {
     AudioSystem.golden();
     UI.toast("\u2728 GOLDEN BAYAT! GET HIM! \u2728", 2200);
+  },
+  onDiamondEvent() {
+    AudioSystem.golden(); // reuse the existing rare-spawn cue rather than adding a new sound
+    UI.toast("\u2666 DIAMOND BAYAT! DON'T LET IT GET AWAY! \u2666", 2200);
+  },
+  onMiniBossEvent(type) {
+    UI.toast("\u26a0 " + type.label + " HAS APPEARED! \u26a0", 2600);
   },
 
   spawnSnowball(bayat, player) {
@@ -963,6 +1092,7 @@ const Game = {
       ) {
         hit = true;
         AudioSystem.snowHit();
+        this.checkAchievement("snowhit");
         this.applyTempEffect(
           "snowball",
           "Frozen",
@@ -1074,6 +1204,7 @@ const Game = {
       this.player.lungeVX = Math.cos(a) * cfg.explosionKnockback;
       this.player.lungeVY = Math.sin(a) * cfg.explosionKnockback;
       UI.toast("\uD83D\uDCA5 BOOM!  \u2212" + dealt.toFixed(0) + "s", 1800);
+      this.checkAchievement("bombhit");
     }
   },
 
@@ -1116,6 +1247,7 @@ const Game = {
     if (this.player.guardianTotal <= (this.player.guardianUsed || 0))
       return false;
     this.player.guardianUsed = (this.player.guardianUsed || 0) + 1;
+    this.checkAchievement("guardiansave");
     this.timer = refillRef * 0.3;
     this.freezeT = 0.16;
     this.shockwaves.push({
@@ -1213,6 +1345,7 @@ const Game = {
       this.maxCombo = Math.max(this.maxCombo, this.combo);
       if (this.combo > 0 && this.combo % 5 === 0)
         UI.comboBanner("HUG x" + this.combo + "!");
+      this.checkComboMilestones();
     }
 
     // Golden Aura (comboAmplifierMult) scales the combo bonus itself
@@ -1228,11 +1361,46 @@ const Game = {
       !isChainHug &&
       this.player.megaHugChance > 0 &&
       Math.random() < this.player.megaHugChance;
+    // Mimic Bayat: a random surprise multiplier, rolled fresh every hug —
+    // see BAYAT_TYPES.mimic's comment for why it's visually identical to
+    // `normal` right up until this moment. Worst case is a "nothing"
+    // shrug, never an actual loss — surprising, not punishing.
+    // Chaos Bayat: a wide random swing every hug, the whole point of it.
+    let surpriseMult = 1,
+      surpriseToast = null;
+    if (type.mimicType) {
+      const roll = Math.random();
+      if (roll < 0.2) {
+        surpriseMult = 3;
+        surpriseToast = "MIMIC JACKPOT!";
+        this.checkAchievement("mimicjackpot");
+      } else if (roll < 0.75) {
+        surpriseMult = 1.5;
+        surpriseToast = "Sneaky surprise!";
+      } else {
+        surpriseMult = 0;
+        surpriseToast = "...just a Bayat?";
+      }
+    } else if (type.chaosType) {
+      surpriseMult = rand(0.4, 5);
+    }
+    if (surpriseToast) UI.toast(surpriseToast, 1800);
     // Bold Hugs (boldHugsRewardMult) trades hug radius (see Player.hugRadius
     // getter) for a straight reward bump.
+    // Combo Milestone x25 and Hyper Hug Mode both fold straight in here —
+    // see Game.onComboMilestone()/enterHyperHugMode(). Double Hug / Chaos
+    // Mode events fold in via activeEvent.def.rewardEventMult.
+    const eventRewardMult =
+      (this.activeEvent && this.activeEvent.def.rewardEventMult) || 1;
+    const modifierRewardMult = (this.runModifier && this.runModifier.rewardMult) || 1;
     const rewardMult =
       (this.player.warmHugsMult || 1) *
       (this.player.boldHugsRewardMult || 1) *
+      (this.player.combo25RewardMult || 1) *
+      (this.hyperModeActive ? CONFIG.hyperMode.rewardMult : 1) *
+      eventRewardMult *
+      modifierRewardMult *
+      surpriseMult *
       (isMega ? 2 : 1);
     if (type.boostType) this.grantBoost(bayat);
 
@@ -1301,7 +1469,20 @@ const Game = {
       }
     }
 
-    if (!type.danger) this.hugs++;
+    if (!type.danger) {
+      this.hugs++;
+      // Lifetime hug count only actually persists at endRun() — add THIS
+      // run's hugs-so-far on top of what's already saved so these fire
+      // exactly when the real total crosses the line, not a run late.
+      const lifetimeSoFar = SaveSystem.getLifetimeHugs() + this.hugs;
+      if (lifetimeSoFar >= 1) this.checkAchievement("firsthug");
+      if (lifetimeSoFar >= 100) this.checkAchievement("hug100");
+      if (lifetimeSoFar >= 1000) this.checkAchievement("hug1000");
+      if (type.key === "golden") this.checkAchievement("goldenhug");
+      if (type.diamondType) this.checkAchievement("diamondhug");
+      if (type.miniBoss) this.checkAchievement("miniboss");
+      if (type.ghostType) this.checkAchievement("ghosthug");
+    }
 
     if (type.medkitType) {
       // Co-op only (see pickType()'s filter — these never spawn solo).
@@ -1345,11 +1526,14 @@ const Game = {
     } else {
       let timeDelta;
       if (type.danger) {
+        // Glass Hands (cursed item): the drawback side of its trade —
+        // Dangerous Bayats cost several times as much.
         timeDelta =
           -3.2 *
           (this.player.thickSkinMult !== undefined
             ? this.player.thickSkinMult
-            : 1);
+            : 1) *
+          (this.player.glassHandsDangerMult || 1);
       } else {
         const factor = this.timeRewardFactor();
         timeDelta =
@@ -1408,6 +1592,575 @@ const Game = {
         this.onHug(second, true);
       }
     }
+  },
+
+  /* =========================================================
+     COMBO MILESTONES + HYPER HUG MODE — see CONFIG.combo.milestones/
+     hyperThreshold and CONFIG.hyperMode for every tunable number. Each
+     milestone fires once per run (comboMilestonesHit tracks which);
+     Hyper Hug Mode is a timed state, not a one-shot, so it can be
+     re-triggered by climbing back up to the threshold again later in
+     the same run. Its multipliers are read directly off CONFIG by
+     Player.speed (entities.js), ToolSystem.update() (tools.js), the
+     reward calc above, and BayatManager.update() (entities.js) — see
+     each site's own "Hyper Hug Mode" comment.
+     ========================================================= */
+  checkComboMilestones() {
+    for (const n of CONFIG.combo.milestones) {
+      if (this.combo >= n && !this.comboMilestonesHit[n]) {
+        this.comboMilestonesHit[n] = true;
+        this.onComboMilestone(n);
+      }
+    }
+    if (
+      this.combo >= CONFIG.combo.hyperThreshold &&
+      this.hyperModeT <= 0
+    ) {
+      this.enterHyperHugMode();
+    }
+  },
+  onComboMilestone(n) {
+    AudioSystem.levelup();
+    this.camera.shake(4 + n * 0.05, 0.18);
+    if (n === 5) {
+      const gain = 12 * this.player.totalExpMult;
+      if (this.mode === "arcade") this.exp.add(gain);
+      UI.comboBanner("COMBO x5! +BONUS");
+      this.particles.text(this.player.x, this.player.y - 50, "+BONUS", "#ffd76a", 15);
+    } else if (n === 10) {
+      this.applyTempEffect(
+        "combo10speed",
+        "Combo Rush",
+        "turbolegs",
+        4,
+        (p) => {
+          p.combo10SpeedMult = 1.2;
+        },
+        (p) => {
+          p.combo10SpeedMult = 1;
+        },
+      );
+      UI.comboBanner("COMBO x10! SPEED UP!");
+    } else if (n === 25) {
+      this.applyTempEffect(
+        "combo25reward",
+        "Combo Bounty",
+        "warmhugs",
+        5,
+        (p) => {
+          p.combo25RewardMult = 1.4;
+        },
+        (p) => {
+          p.combo25RewardMult = 1;
+        },
+      );
+      UI.comboBanner("COMBO x25! BIGGER REWARDS!");
+    } else if (n === 50) {
+      this.triggerFlash("#ff7ab8", 0.4);
+      this.shockwaves.push({
+        x: this.player.x,
+        y: this.player.y,
+        color: "#ff7ab8",
+        t: 0,
+        duration: 0.55,
+        maxR: 160,
+      });
+      this.particles.burst(this.player.x, this.player.y, "#ff7ab8", 50, {
+        maxSpeed: 260,
+        minLife: 0.4,
+        maxLife: 0.85,
+      });
+      UI.comboBanner("COMBO x50!! INCREDIBLE!!");
+      this.checkAchievement("combo50");
+    }
+  },
+  enterHyperHugMode() {
+    this.hyperModeT = CONFIG.hyperMode.duration;
+    this.hyperModeHitThisRun = true;
+    this.checkAchievement("hyperhug");
+    this.triggerFlash("#ffd76a", 0.6);
+    this.camera.shake(14, 0.35);
+    this.freezeT = 0.12;
+    this.shockwaves.push({
+      x: this.player.x,
+      y: this.player.y,
+      color: "#ffd76a",
+      t: 0,
+      duration: 0.7,
+      maxR: 260,
+    });
+    this.particles.burst(this.player.x, this.player.y, "#ffd76a", 70, {
+      maxSpeed: 320,
+      minLife: 0.5,
+      maxLife: 1.0,
+    });
+    UI.comboBanner("★ HYPER HUG MODE ★");
+    UI.toast("HYPER HUG MODE — everything is faster, bigger, chaotic!", 3000);
+    AudioSystem.golden();
+  },
+  updateHyperMode(dt) {
+    if (this.hyperModeT > 0) {
+      this.hyperModeT -= dt;
+      if (this.hyperModeT <= 0) {
+        this.hyperModeT = 0;
+        UI.toast("Hyper Hug Mode faded...", 1800);
+      }
+    }
+  },
+
+  /* =========================================================
+     RANDOM EVENTS — see EVENT_POOL in content.js for the data and the
+     comment there for how each field gets read elsewhere. This method
+     only owns the scheduling (when to roll, when to end); it never
+     reaches into other systems directly.
+     ========================================================= */
+  updateEvents(dt) {
+    if (this.activeEvent) {
+      this.activeEvent.t += dt;
+      if (this.activeEvent.t >= this.activeEvent.duration) {
+        this.endEvent();
+      }
+      // Magnet Storm: a steady pull applied directly here (not via
+      // hookedT — that's a short pulse other tools use; this needs to
+      // keep pulling every frame for the whole event) rather than a new
+      // per-Bayat state machine. Dangerous Bayats are left alone, same
+      // as every pull tool in tools.js. Random events aren't synced in
+      // co-op at all yet (a known gap — see CLAUDE.md), but this one
+      // specifically mutates Bayat position directly, which would fight
+      // updatePuppet()'s lerp-toward-host-snapshot on a non-host client;
+      // every other event only READS speed/reward multipliers, so this
+      // is the one spot that needs its own host-only guard.
+      if (
+        this.activeEvent &&
+        this.activeEvent.def.globalPull &&
+        (!this.coop || Multiplayer.isHost)
+      ) {
+        const pull = 90;
+        for (const n of this.bayats.list) {
+          if (!n.alive || n.type.danger) continue;
+          const a = Math.atan2(this.player.y - n.y, this.player.x - n.x);
+          n.x += Math.cos(a) * pull * dt;
+          n.y += Math.sin(a) * pull * dt;
+        }
+      }
+      return; // one event at a time — don't also count down toward the next roll
+    }
+    this.eventTimer -= dt;
+    if (this.eventTimer <= 0) {
+      this.eventTimer = rand(CONFIG.events.minGap, CONFIG.events.maxGap);
+      this.rollEvent();
+    }
+  },
+  rollEvent() {
+    const def = weightedPick(
+      EVENT_POOL.map((e) => ({ item: e, weight: e.weight })),
+    );
+    if (!def) return;
+    this.activeEvent = { def, t: 0, duration: def.duration };
+    this.eventsTriggeredThisRun.push(def.name);
+    if (def.id === "chaosmode") this.checkAchievement("chaosevent");
+    this.triggerFlash(def.color, 0.35);
+    this.camera.shake(7, 0.25);
+    UI.comboBanner(def.name);
+    UI.toast(def.name + " — " + def.desc, 3000);
+    AudioSystem.toolFire();
+  },
+  endEvent() {
+    if (this.activeEvent) UI.toast(this.activeEvent.def.name + " has ended.", 1600);
+    this.activeEvent = null;
+  },
+
+  // ---- Destructible decor: walking up to a rock/crystal breaks it for a
+  // small random reward (or nothing — see the roll below). Purely a
+  // proximity trigger, same "no attack button, hugging IS the
+  // interaction" philosophy as everything else in this game. Once broken
+  // it's just gone (drawDecor() skips d.broken) — no rubble sprite. ----
+  updateDestructibles() {
+    const breakRadius2 = 34 * 34;
+    for (const d of this.decor) {
+      if (d.broken) continue;
+      if (d.kind !== "rock" && d.kind !== "crystal") continue;
+      if (dist2(this.player.x, this.player.y, d.x, d.y) > breakRadius2) continue;
+      d.broken = true;
+      this.particles.burst(d.x, d.y, d.c, 16, {
+        maxSpeed: 160,
+        minLife: 0.3,
+        maxLife: 0.6,
+      });
+      AudioSystem.slip(); // reuse a short existing impact sound rather than adding a new one
+      const roll = Math.random();
+      if (roll < 0.45) {
+        if (this.mode === "arcade") this.exp.add(8 * this.player.totalExpMult);
+        else this.timer = clamp(this.timer + 0.6, 0, this.maxStoredTime);
+        this.particles.text(d.x, d.y - 16, "+bonus", "#6fe3a3", 12);
+      } else if (roll < 0.7) {
+        const def = weightedPick(
+          PICKUP_DEFS.map((pd) => ({ item: pd, weight: pd.weight })),
+        );
+        this.pickups.push({ x: d.x, y: d.y, def, bob: Math.random() * 10 });
+      } else if (roll < 0.85) {
+        this.applyTempEffect(
+          "decorluck",
+          "Lucky Find",
+          "clover",
+          8,
+          (p) => {
+            p.luckMult *= 1.3;
+          },
+          (p) => {
+            p.luckMult /= 1.3;
+          },
+        );
+        this.particles.text(d.x, d.y - 16, "lucky!", "#7fd8e8", 12);
+      }
+      // else: nothing — breaking decor isn't guaranteed loot, matching
+      // the spec's "give XP / time / buff / rare item / nothing" list.
+    }
+  },
+
+  /* =========================================================
+     ACHIEVEMENTS — see ACHIEVEMENTS in content.js and SaveSystem's
+     getUnlockedAchievements()/unlockAchievement(). checkAchievement(id)
+     is the ONE call every trigger site uses; it's safe to call
+     repeatedly (SaveSystem.unlockAchievement() no-ops and returns false
+     once already unlocked) so callers never need their own "have I
+     already..." guard.
+     ========================================================= */
+  checkAchievement(id) {
+    if (!SaveSystem.unlockAchievement(id)) return;
+    const def = ACHIEVEMENTS.find((a) => a.id === id);
+    this.achievementsThisRun.push(id);
+    AudioSystem.levelup();
+    UI.toast(
+      "🏆 ACHIEVEMENT: " + (def ? def.name : id),
+      3000,
+    );
+  },
+
+  /* =========================================================
+     WORLD PICKUPS — see PICKUP_DEFS in content.js. Spawn/collection
+     logic lives here (mirrors ChestSystem's own spawn/open pattern
+     closely on purpose); collectPickup() is where each def's fields
+     actually get applied.
+     ========================================================= */
+  updatePickups(dt) {
+    this.pickupSpawnTimer -= dt;
+    if (
+      this.pickupSpawnTimer <= 0 &&
+      this.pickups.length < CONFIG.pickups.maxOnField
+    ) {
+      this.pickupSpawnTimer = CONFIG.pickups.spawnInterval * rand(0.7, 1.3);
+      this.spawnPickup();
+    }
+    const collectRadius =
+      CONFIG.pickups.collectRadius + this.player.magnetLevel * 16;
+    for (let i = this.pickups.length - 1; i >= 0; i--) {
+      const p = this.pickups[i];
+      p.bob += dt * 2.4;
+      if (
+        this.player.magnetLevel > 0 &&
+        dist(this.player.x, this.player.y, p.x, p.y) < collectRadius * 3
+      ) {
+        const pull = Math.min(1, dt * 1.1 * this.player.magnetLevel);
+        p.x = lerp(p.x, this.player.x, pull);
+        p.y = lerp(p.y, this.player.y, pull);
+      }
+      if (dist(this.player.x, this.player.y, p.x, p.y) < collectRadius) {
+        this.collectPickup(p);
+        this.pickups.splice(i, 1);
+      }
+    }
+  },
+  spawnPickup() {
+    const ang = Math.random() * TAU,
+      r = rand(400, 800);
+    const x = clamp(
+      this.player.x + Math.cos(ang) * r,
+      60,
+      CONFIG.arena.width - 60,
+    );
+    const y = clamp(
+      this.player.y + Math.sin(ang) * r,
+      60,
+      CONFIG.arena.height - 60,
+    );
+    const def = weightedPick(PICKUP_DEFS.map((d) => ({ item: d, weight: d.weight })));
+    this.pickups.push({ x, y, def, bob: Math.random() * 10 });
+  },
+  collectPickup(p) {
+    const def = p.def;
+    this.particles.burst(p.x, p.y, def.color, 16, {
+      maxSpeed: 140,
+      minLife: 0.3,
+      maxLife: 0.6,
+    });
+    AudioSystem.chest();
+    if (def.timeValue) {
+      if (this.mode === "full") {
+        this.timer = clamp(this.timer + def.timeValue, 0, this.maxStoredTime);
+        this.particles.text(p.x, p.y - 20, "+" + def.timeValue.toFixed(1) + "s", def.color, 14);
+      } else {
+        const gain = def.timeValue * 8 * this.player.totalExpMult;
+        this.exp.add(gain);
+        this.particles.text(p.x, p.y - 20, "+" + Math.round(gain) + " EXP", def.color, 14);
+      }
+    } else if (def.expValue) {
+      const gain = def.expValue * this.player.totalExpMult;
+      if (this.mode === "arcade") this.exp.add(gain);
+      else this.timer = clamp(this.timer + def.expValue * 0.05, 0, this.maxStoredTime);
+      this.particles.text(p.x, p.y - 20, "+" + Math.round(gain) + " XP", def.color, 14);
+    } else if (def.comboBoost) {
+      this.combo += def.comboBoost;
+      this.maxCombo = Math.max(this.maxCombo, this.combo);
+      this.lastHugTime = this.elapsed;
+      this.checkComboMilestones();
+      this.particles.text(p.x, p.y - 20, "COMBO +" + def.comboBoost, def.color, 14);
+    } else if (def.luckBuffDuration) {
+      this.applyTempEffect(
+        "luckorb",
+        "Luck Orb",
+        "clover",
+        def.luckBuffDuration,
+        (pl) => {
+          pl.luckMult *= 1.8;
+        },
+        (pl) => {
+          pl.luckMult /= 1.8;
+        },
+      );
+      this.particles.text(p.x, p.y - 20, "LUCKY!", def.color, 14);
+    } else if (def.triggerEvent) {
+      if (!this.activeEvent) this.rollEvent();
+      this.particles.text(p.x, p.y - 20, "CHAOS!", def.color, 14);
+    } else if (def.mystery) {
+      // Grab-bag: a little of everything, always net-positive.
+      const roll = Math.random();
+      if (roll < 0.3) {
+        if (this.mode === "full")
+          this.timer = clamp(this.timer + 4, 0, this.maxStoredTime);
+        else this.exp.add(30 * this.player.totalExpMult);
+        this.particles.text(p.x, p.y - 20, "MYSTERY: bonus!", def.color, 14);
+      } else if (roll < 0.6) {
+        const pool = STAT_UPGRADES.concat(TOOL_DEFS).filter(
+          (d) => !this.upgrades.isMaxed(d),
+        );
+        if (pool.length) {
+          const pick = choice(pool);
+          const lvl = this.upgrades.apply(pick, this.player);
+          this.checkEvolutions();
+          this.particles.text(p.x, p.y - 20, pick.name + " Lv" + lvl, def.color, 13);
+        }
+      } else if (roll < 0.85) {
+        this.combo += 4;
+        this.maxCombo = Math.max(this.maxCombo, this.combo);
+        this.checkComboMilestones();
+        this.particles.text(p.x, p.y - 20, "MYSTERY: combo!", def.color, 14);
+      } else {
+        if (!this.activeEvent) this.rollEvent();
+        this.particles.text(p.x, p.y - 20, "MYSTERY: chaos!", def.color, 14);
+      }
+    }
+  },
+
+  /* =========================================================
+     RARE JUMPSCARE — an original pixel-art mascot ("Mr. Squeeze", drawn
+     procedurally in render-helpers.js's drawJumpscareOverlay — not a
+     reproduction of any existing copyrighted character). Rolled every
+     frame at CONFIG.jumpscare.chancePerSecond while playing; freezes
+     gameplay the same way a mega-hug or evolution does (this.freezeT),
+     then resolves one random outcome from the table below. The rare
+     Golden variant always resolves to the best outcome.
+     ========================================================= */
+  updateJumpscareRoll(dt) {
+    if (this.jumpscareT > 0 || this.freezeT > 0) return; // already showing one, or mid something else
+    if (Math.random() < CONFIG.jumpscare.chancePerSecond * dt) {
+      this.triggerJumpscare();
+    }
+  },
+  // How long a scare lasts (freeze + visible). Defaults to the static
+  // CONFIG timing, but when a real video/audio asset is configured and
+  // loaded we stretch to that media's own length so a 5s clip doesn't
+  // get chopped off a third of the way through. Bounded on both ends by
+  // CONFIG.jumpscare (never shorter than the built-in feel, never longer
+  // than maxMediaDuration) so a wrongly-sized file can't lock up a run.
+  // `duration` is NaN until metadata loads — guarded with isFinite.
+  jumpscareDuration() {
+    const cfg = CONFIG.jumpscare;
+    const base = cfg.freezeDuration + cfg.visibleDuration;
+    if (!cfg.useMediaDuration) return base;
+    let longest = 0;
+    const v = Videos.jumpscareLoaded && Videos.jumpscare;
+    const a = Sounds.jumpscareLoaded && Sounds.jumpscare;
+    if (v && isFinite(v.duration)) longest = Math.max(longest, v.duration);
+    if (a && isFinite(a.duration)) longest = Math.max(longest, a.duration);
+    if (longest <= 0) return base;
+    return clamp(longest, base, cfg.maxMediaDuration);
+  },
+  // Hard-stops the optional video/audio assets. Called when a scare ends
+  // naturally, and on every path that leaves gameplay (quit, run over,
+  // starting a new run) — otherwise a 5s scream would keep playing over
+  // the results screen if the run ended mid-scare.
+  stopJumpscareMedia() {
+    this.jumpscareVideoReady = false;
+    try {
+      if (Videos.jumpscare) {
+        Videos.jumpscare.pause();
+        // Rewind NOW rather than at the next trigger. A <video> keeps
+        // displaying its last decoded frame while a seek is in flight, so
+        // rewinding here means the element is already parked on frame 0
+        // long before the next scare needs it — without this you get a
+        // flash of the PREVIOUS playthrough's final frame at the start of
+        // the next scare. (triggerJumpscare still guards on the seek
+        // completing, since the very first scare of a session and any
+        // interrupted seek can still land here mid-flight.)
+        Videos.jumpscare.currentTime = 0;
+      }
+    } catch (e) {}
+    try {
+      if (Sounds.jumpscare) {
+        Sounds.jumpscare.pause();
+        Sounds.jumpscare.currentTime = 0;
+      }
+    } catch (e) {}
+  },
+  // `forceGolden` lets a caller (the J test hotkey, Shift+J specifically)
+  // skip the random roll and guarantee the rare Golden variant — leave
+  // it undefined for the real random-roll path.
+  triggerJumpscare(forceGolden) {
+    this.jumpscareGolden =
+      forceGolden !== undefined
+        ? forceGolden
+        : Math.random() < CONFIG.jumpscare.goldenChance;
+    const total = this.jumpscareDuration();
+    this.jumpscareT = total;
+    this.freezeT = Math.max(this.freezeT, total);
+    this.camera.shake(this.jumpscareGolden ? 22 : 16, 0.4);
+    // Dedicated sting (or your own ASSETS.jumpscareSound file if set) —
+    // see AudioSystem.playJumpscare().
+    AudioSystem.playJumpscare(this.jumpscareGolden);
+    // If a jumpscare VIDEO is configured and ready, restart it from the
+    // top so every scare plays from frame 0. drawJumpscareOverlay() is
+    // what actually paints its frames onto the canvas.
+    //
+    // `jumpscareVideoReady` gates DRAWING on the rewind actually having
+    // landed. Setting currentTime is an async seek and the element keeps
+    // presenting its previous last-decoded frame until the seek
+    // completes — drawing during that window is what caused "shows the
+    // end of the video for a moment, then restarts". See CLAUDE.md bug
+    // history before removing this gate.
+    this.jumpscareVideoReady = false;
+    if (Videos.jumpscareLoaded && Videos.jumpscare) {
+      const v = Videos.jumpscare;
+      try {
+        if (v.currentTime === 0 && v.readyState >= 2) {
+          // Already parked on frame 0 (stopJumpscareMedia rewound it) —
+          // no seek will fire, so nothing to wait for.
+          this.jumpscareVideoReady = true;
+        } else {
+          v.addEventListener(
+            "seeked",
+            () => {
+              this.jumpscareVideoReady = true;
+            },
+            { once: true },
+          );
+          v.currentTime = 0;
+        }
+        const p = v.play();
+        if (p && p.catch) p.catch(() => {}); // blocked playback just means the PNG path draws instead
+      } catch (e) {
+        /* non-fatal — drawJumpscareOverlay falls back on its own */
+      }
+    }
+    this.checkAchievement("jumpscare");
+    if (this.jumpscareGolden) {
+      this.checkAchievement("goldenjumpscare");
+      this.applyJumpscareOutcome("golden");
+    } else {
+      const outcomes = [
+        "nothing",
+        "stealtime",
+        "speedboost",
+        "scarebayats",
+        "randomitem",
+        "invert",
+        "event",
+      ];
+      this.applyJumpscareOutcome(choice(outcomes));
+    }
+  },
+  applyJumpscareOutcome(outcome) {
+    const p = this.player;
+    if (outcome === "nothing") {
+      this.jumpscareOutcomeText = "...just the wind?";
+    } else if (outcome === "stealtime") {
+      if (this.mode === "full") {
+        const stolen = Math.min(2, this.timer);
+        this.timer = Math.max(0, this.timer - stolen);
+        this.jumpscareOutcomeText = "Stole " + stolen.toFixed(1) + "s!";
+      } else {
+        const stolen = Math.min(8, this.exp.exp);
+        this.exp.exp = Math.max(0, this.exp.exp - stolen);
+        this.jumpscareOutcomeText = "Stole some EXP!";
+      }
+    } else if (outcome === "speedboost") {
+      this.applyTempEffect(
+        "jumpscarespeed",
+        "Startled Sprint",
+        "shoes",
+        6,
+        (pl) => {
+          pl.speedMult *= 1.5;
+        },
+        (pl) => {
+          pl.speedMult /= 1.5;
+        },
+      );
+      this.jumpscareOutcomeText = "Startled you into a sprint!";
+    } else if (outcome === "scarebayats") {
+      for (const n of this.bayats.list) {
+        if (!n.alive) continue;
+        const a = Math.atan2(n.y - p.y, n.x - p.x);
+        n.x += Math.cos(a) * 140;
+        n.y += Math.sin(a) * 140;
+        n.stunT = Math.max(n.stunT, 0.4);
+      }
+      this.jumpscareOutcomeText = "Scared every Bayat away!";
+    } else if (outcome === "randomitem") {
+      const pool = STAT_UPGRADES.concat(TOOL_DEFS).filter(
+        (d) => !this.upgrades.isMaxed(d),
+      );
+      if (pool.length) {
+        const pick = choice(pool);
+        const lvl = this.upgrades.apply(pick, p);
+        this.jumpscareOutcomeText = "Gave you " + pick.name + " Lv" + lvl + "!";
+        this.checkEvolutions();
+      } else {
+        this.jumpscareOutcomeText = "Tried to give you something...";
+      }
+    } else if (outcome === "invert") {
+      p.invertControlsT = 4;
+      this.jumpscareOutcomeText = "Your controls are INVERTED!";
+    } else if (outcome === "event") {
+      if (!this.activeEvent) this.rollEvent();
+      this.jumpscareOutcomeText = "Triggered something...";
+    } else if (outcome === "golden") {
+      const pool = STAT_UPGRADES.concat(TOOL_DEFS).filter(
+        (d) => !this.upgrades.isMaxed(d),
+      );
+      for (let i = 0; i < 3 && pool.length; i++) {
+        const idx = randInt(0, pool.length - 1);
+        this.upgrades.apply(pool.splice(idx, 1)[0], p);
+      }
+      this.checkEvolutions();
+      if (this.mode === "full") {
+        this.timer = clamp(this.timer + 8, 0, this.maxStoredTime);
+      } else {
+        this.exp.add(60 * p.totalExpMult);
+      }
+      this.jumpscareOutcomeText = "★ GOLDEN VISIT — HUGE REWARD! ★";
+    }
+    UI.toast(this.jumpscareOutcomeText, 2600);
   },
 
   applyAutoLevel(times) {
@@ -1539,6 +2292,16 @@ const Game = {
   },
   onChestOpened(chest) {
     const kindDef = CHEST_KINDS[chest.kind] || CHEST_KINDS.normal;
+    // Cursed Chest: rolled independently of tier, before anything else —
+    // if it hits, this chest grants ONE CURSED_ITEMS entry instead of its
+    // normal picks (still keeps the flat EXP/time bonus below so opening
+    // one is never a total dud). See CONFIG.cursedChest.chance and
+    // CURSED_ITEMS in content.js.
+    const cursedPool = CURSED_ITEMS.filter((c) => !this.cursedItemsTaken[c.id]);
+    if (cursedPool.length && Math.random() < CONFIG.cursedChest.chance) {
+      this.grantCursedItem(chest, cursedPool);
+      return;
+    }
     let picks = kindDef.picks || 1;
     const grants = []; // {name, lvl|null, isSynergy}
 
@@ -1594,6 +2357,28 @@ const Game = {
       );
     }
   },
+  grantCursedItem(chest, cursedPool) {
+    const item = choice(cursedPool);
+    this.cursedItemsTaken[item.id] = true;
+    this.applyTempEffect(item.id, item.name, item.icon, Infinity, item.apply, item.revert);
+    this.checkAchievement("cursed");
+    const kindDef = CHEST_KINDS[chest.kind] || CHEST_KINDS.normal;
+    const bonusScale = kindDef.picks || 1;
+    this.grantFlatReward(
+      chest,
+      (6 + bonusScale * 4) * this.player.totalExpMult,
+      0.9 * bonusScale,
+    );
+    this.triggerFlash("#ff5c72", 0.5);
+    this.camera.shake(10, 0.3);
+    this.particles.burst(this.player.x, this.player.y, "#ff5c72", 40, {
+      maxSpeed: 240,
+      minLife: 0.4,
+      maxLife: 0.85,
+    });
+    UI.toast("☠ CURSED ITEM: " + item.name + " — " + item.desc, 3600);
+    AudioSystem.danger();
+  },
   grantSynergy(synergy) {
     this.obtainedSynergies[synergy.id] = true;
     const def = synergy.resultTool;
@@ -1640,6 +2425,7 @@ const Game = {
     const hr = this.player.hugRadius;
     for (const n of this.bayats.list) {
       if (!n.alive) continue;
+      if (n.type.ghostType && n.ghostPhased) continue; // can't hug it mid-phase
       const rr = hr + n.radius * 0.6;
       if (dist2(this.player.x, this.player.y, n.x, n.y) <= rr * rr) {
         this.onHug(n, false);
@@ -1792,7 +2578,13 @@ const Game = {
   endRun() {
     this.state = "gameover";
     UI.els["hud"].classList.remove("active");
-    SaveSystem.addLifetimeHugs(this.hugs);
+    UI.updateActiveEventBanner(false, null);
+    this.jumpscareT = 0;
+    this.stopJumpscareMedia();
+    const lifetimeTotal = SaveSystem.addLifetimeHugs(this.hugs);
+    if (ARENAS.every((a) => !a.unlock || lifetimeTotal >= a.unlock.value)) {
+      this.checkAchievement("allarenas");
+    }
     let isRecord = false;
     const arenaId = this.arena ? this.arena.id : "meadow";
     if (this.mode === "arcade") {
@@ -1802,7 +2594,14 @@ const Game = {
       }
       UI.showResults(
         "arcade",
-        { hugs: this.hugs, maxCombo: this.maxCombo, level: this.exp.level },
+        {
+          hugs: this.hugs,
+          maxCombo: this.maxCombo,
+          level: this.exp.level,
+          events: this.eventsTriggeredThisRun,
+          achievements: this.achievementsThisRun,
+          hyperMode: this.hyperModeHitThisRun,
+        },
         isRecord,
       );
     } else {
@@ -1817,6 +2616,9 @@ const Game = {
           hugs: this.hugs,
           maxCombo: this.maxCombo,
           level: this.exp.level,
+          events: this.eventsTriggeredThisRun,
+          achievements: this.achievementsThisRun,
+          hyperMode: this.hyperModeHitThisRun,
         },
         isRecord,
       );
@@ -1833,6 +2635,12 @@ const Game = {
     // instant while fx/particles keep animating, then resumes automatically.
     if (this.freezeT > 0) {
       this.freezeT -= dt;
+      if (this.jumpscareT > 0) {
+        this.jumpscareT -= dt;
+        // Stop the optional jumpscare media the moment it stops being
+        // shown, rather than letting it keep decoding/playing unseen.
+        if (this.jumpscareT <= 0) this.stopJumpscareMedia();
+      }
       this.particles.update(dt);
       this.updateDeathFx(dt);
       this.updateShockwaves(dt);
@@ -1840,6 +2648,7 @@ const Game = {
       if (this.screenFlashT > 0) this.screenFlashT -= dt;
       return;
     }
+    this.updateJumpscareRoll(dt);
 
     this.elapsed += dt;
 
@@ -1865,7 +2674,9 @@ const Game = {
       // again on every single frame.
       if (!this.player.downed) {
         this.timer = Math.min(this.timer, this.maxStoredTime);
-        this.timer -= dt;
+        // Blood Clock (cursed item): the drawback side — the timer
+        // itself drains faster in exchange for the much bigger hug reward.
+        this.timer -= dt * (this.player.bloodClockDrainMult || 1);
         if (this.timer <= 0) {
           if (!this.tryGuardianSave(this.maxStoredTime)) {
             this.timer = 0;
@@ -1899,6 +2710,7 @@ const Game = {
         this.coop ? Object.values(this.mpPeers) : null,
       );
     }
+    if (this.bayats.list.length >= 60) this.checkAchievement("manybayats");
     if (this.coop) this.mpUpdateNetworking(dt);
     if (this.mode === "full") this.tools.update(dt, this.player, this.bayats);
     this.chests.update(
@@ -1913,8 +2725,16 @@ const Game = {
     if (this.mode === "full") this.applyTimeRegen(dt);
     this.updateFxZones(dt);
     this.updateTempEffects(dt);
+    this.updateHyperMode(dt);
+    this.updateEvents(dt);
+    this.updatePickups(dt);
+    this.updateDestructibles();
     this.checkHugs();
+    // Infinite Combo run modifier — see ARENA_MODIFIERS in content.js —
+    // simply skips the decay check entirely; the combo can still only
+    // grow via real hugs, it just never times out on its own.
     if (
+      !(this.runModifier && this.runModifier.infiniteCombo) &&
       this.combo > 0 &&
       this.elapsed - this.lastHugTime >
         CONFIG.combo.window + (this.player.comboWindowBonus || 0)
@@ -1962,6 +2782,7 @@ const Game = {
       expProgress: this.exp.progress,
       mode: this.mode,
     });
+    UI.updateActiveEventBanner(this.hyperModeActive, this.activeEvent);
     if (this.mode === "full") UI.renderTools(this.tools);
   },
 
@@ -2192,6 +3013,7 @@ const Game = {
     }
 
     if (this.chests) this.chests.draw(ctx, cam);
+    for (const p of this.pickups) drawPickup(ctx, cam, p);
     if (this.bayats) this.bayats.draw(ctx, cam);
 
     // pixel death-pop: 3 discrete stepped frames of the tinted sprite scaling+fading out
@@ -2325,6 +3147,41 @@ const Game = {
     if (this.particles) this.particles.draw(ctx, cam);
     ctx.restore();
 
+    // Blackout event: darkens everything except a radius around the
+    // player — drawn in plain screen space like the flash below, as a
+    // radial gradient "hole" rather than a composite-operation punch-out
+    // (simpler, and this canvas never needs the darkness to affect
+    // anything drawn later, so a gradient is all that's needed).
+    if (this.activeEvent && this.activeEvent.def.darkness) {
+      const px = this.player.x - cam.x,
+        py = this.player.y - cam.y;
+      const visRadius = 190;
+      const grad = ctx.createRadialGradient(
+        px,
+        py,
+        visRadius * 0.25,
+        px,
+        py,
+        visRadius * 1.9,
+      );
+      grad.addColorStop(0, "rgba(5,3,10,0)");
+      grad.addColorStop(1, "rgba(5,3,10,0.94)");
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, cam.w, cam.h);
+    }
+    // Rare jumpscare mascot — see Game.triggerJumpscare() and
+    // render-helpers.js's drawJumpscareOverlay for the "why an original
+    // character" note.
+    if (this.jumpscareT > 0) {
+      drawJumpscareOverlay(
+        ctx,
+        cam,
+        this.jumpscareT,
+        this.jumpscareDuration(),
+        this.jumpscareGolden,
+        this.jumpscareVideoReady,
+      );
+    }
     // full-screen flash for big moments (combo milestones, explosions, saves) —
     // drawn after restore() so it sits in plain screen space, unaffected by shake
     if (this.screenFlashT > 0) {

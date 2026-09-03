@@ -39,6 +39,10 @@ class ChestSystem {
     this.timer = rand(8, 14);
   }
   update(dt, elapsed, player, chestLuck) {
+    // "No Chests" run modifier — see ARENA_MODIFIERS in content.js. Bayat
+    // rewards are boosted separately (Game.runModifier.rewardMult) to
+    // compensate, so this trades chest RNG for a flat, reliable bump.
+    if (Game.runModifier && Game.runModifier.noChests) return;
     this.timer -= dt;
     if (this.timer <= 0 && this.chests.length < 4) {
       this.spawn(player, chestLuck);
@@ -97,6 +101,7 @@ class ChestSystem {
     chest.opened = true;
     chest.openT = 0;
     AudioSystem.chest();
+    if (chest.kind === "legendary") Game.checkAchievement("legendarychest");
     const def = CHEST_KINDS[chest.kind];
     Game.particles.burst(
       chest.x,

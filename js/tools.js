@@ -29,7 +29,13 @@ class ToolSystem {
       t.cd -= dt;
       if (t.cd <= 0) {
         this.fire(t, player, bayatManager);
-        t.cd = t.def.baseCooldown * player.cooldownMult * rand(0.96, 1.04);
+        // Hyper Hug Mode (CONFIG.hyperMode.cooldownMult) makes every
+        // cooldown-cast tool fire faster while it's active.
+        const hyperMult = Game.hyperModeActive
+          ? CONFIG.hyperMode.cooldownMult
+          : 1;
+        t.cd =
+          t.def.baseCooldown * player.cooldownMult * hyperMult * rand(0.96, 1.04);
       }
     }
   }
@@ -125,6 +131,40 @@ class ToolSystem {
           maxT: 0.3,
         });
         if (targets.length) AudioSystem.toolFire();
+      }
+    } else if (t.def.id === "tesla") {
+      // Periodic chain lightning — picks a random chain of nearby
+      // Bayats and zaps each in sequence (bolt drawn coil-to-first,
+      // then first-to-next, etc), pulling each one slightly.
+      t.timer = (t.timer || 0) - dt;
+      if (t.timer <= 0) {
+        t.timer = t.def.tickInterval;
+        const chainCount = CONFIG.tesla.chainCount + Math.floor(t.level / 2);
+        const pool = nm
+          .inRadius(player.x, player.y, range)
+          .filter((n) => !n.type.danger);
+        const chain = [];
+        const poolCopy = pool.slice();
+        while (chain.length < chainCount && poolCopy.length) {
+          const idx = randInt(0, poolCopy.length - 1);
+          chain.push(poolCopy.splice(idx, 1)[0]);
+        }
+        let fromX = player.x,
+          fromY = player.y;
+        for (const n of chain) {
+          n.hookedT = Math.max(n.hookedT, 0.3);
+          Game.lightningBolts.push({
+            x1: fromX,
+            y1: fromY,
+            x2: n.x,
+            y2: n.y,
+            t: 0,
+            dur: 0.16,
+          });
+          fromX = n.x;
+          fromY = n.y;
+        }
+        if (chain.length) AudioSystem.toolFire();
       }
     } else if (t.def.id === "gravitywell") {
       // Synergy result (Black Hole + Vacuum): a permanent, always-on strong
@@ -930,6 +970,64 @@ class ToolSystem {
         drawRopeLine(player, best, "#ff7ab8");
         Game.particles.burst(best.x, best.y, "#ff7ab8", 14, { maxSpeed: 140 });
         AudioSystem.toolFire();
+        break;
+      }
+      case "timebomb": {
+        // Dropped close to the player (a real bomb PLACEMENT, not thrown
+        // far like carepackage) — after the fuse, non-danger Bayats get
+        // pulled in as usual but Dangerous ones get knocked AWAY instead,
+        // the only tool that pushes danger back rather than just slowing it.
+        const ang = Math.random() * TAU,
+          dropR = rand(20, 70);
+        const tx = clamp(
+          player.x + Math.cos(ang) * dropR,
+          60,
+          CONFIG.arena.width - 60,
+        );
+        const ty = clamp(
+          player.y + Math.sin(ang) * dropR,
+          60,
+          CONFIG.arena.height - 60,
+        );
+        Game.telegraphs.push({
+          x: tx,
+          y: ty,
+          r: range,
+          color: "#ff7a3d",
+          t: t.def.telegraphTime,
+          maxT: t.def.telegraphTime,
+        });
+        Game.delayedEffects.push({
+          t: t.def.telegraphTime,
+          fn: () => {
+            const targets = nm.inRadius(tx, ty, range);
+            for (const n of targets) {
+              if (n.type.danger) {
+                const a = Math.atan2(n.y - ty, n.x - tx);
+                n.x += Math.cos(a) * 150;
+                n.y += Math.sin(a) * 150;
+                n.stunT = Math.max(n.stunT, 0.5);
+              } else {
+                n.hookedT = Math.max(n.hookedT, 0.4 + t.level * 0.05);
+              }
+            }
+            Game.particles.burst(tx, ty, "#ff7a3d", 36, {
+              maxSpeed: 240,
+              minLife: 0.4,
+              maxLife: 0.8,
+            });
+            Game.shockwaves.push({
+              x: tx,
+              y: ty,
+              color: "#ff7a3d",
+              t: 0,
+              duration: 0.4,
+              maxR: range,
+            });
+            Game.camera.shake(10, 0.25);
+            AudioSystem.toolFire();
+          },
+        });
         break;
       }
     }

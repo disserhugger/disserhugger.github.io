@@ -14,6 +14,9 @@ const UI = {
       "screen-pause",
       "screen-inventory",
       "screen-arena",
+      "screen-achievements",
+      "ach-progress",
+      "achievements-list",
       "screen-mp-profile",
       "screen-mp-hostjoin",
       "screen-mp-lobby",
@@ -22,6 +25,7 @@ const UI = {
       "mp-join-code-input",
       "mp-room-code",
       "mp-peer-list",
+      "mp-conn-status",
       "mp-start-btn",
       "hud",
       "hud-timer",
@@ -40,6 +44,7 @@ const UI = {
       "inv-body",
       "arena-list",
       "combo-banner",
+      "active-event-banner",
       "event-toast",
       "results-title",
       "results-stats",
@@ -65,6 +70,7 @@ const UI = {
     "screen-pause",
     "screen-inventory",
     "screen-arena",
+    "screen-achievements",
     "screen-mp-profile",
     "screen-mp-hostjoin",
     "screen-mp-lobby",
@@ -102,12 +108,52 @@ const UI = {
       state.timer < 6 && state.timer > 0,
     );
     this.els["hud-secondary"].textContent = state.hugs;
-    this.els["hud-combo"].textContent = "x" + state.combo;
-    this.els["hud-level"].textContent = state.level;
+    // Only touch the DOM when the value actually changed — updateHud runs
+    // every frame, and re-triggering the bump animation (or reassigning
+    // identical text) every frame would both look wrong and cost layout.
+    if (state.combo !== this._lastCombo) {
+      const el = this.els["hud-combo"];
+      el.textContent = "x" + state.combo;
+      if (state.combo > (this._lastCombo || 0)) {
+        el.classList.remove("bump");
+        void el.offsetWidth; // reflow so the animation can restart mid-flight
+        el.classList.add("bump");
+      }
+      this._lastCombo = state.combo;
+    }
+    if (state.level !== this._lastLevel) {
+      this.els["hud-level"].textContent = state.level;
+      this._lastLevel = state.level;
+    }
     this.els["expbar-fill"].style.width =
       (state.expProgress * 100).toFixed(1) + "%";
-    this.els["level-label"].textContent =
+    const expText =
       state.mode === "arcade" ? "AUTO-LEVELING" : `EXP  ·  LV ${state.level}`;
+    if (expText !== this._lastExpText) {
+      this.els["level-label"].textContent = expText;
+      this._lastExpText = expText;
+    }
+  },
+  _lastCombo: null,
+  _lastLevel: null,
+  _lastExpText: null,
+  // Persistent "why is everything acting weird" indicator — see
+  // #active-event-banner's CSS comment. Hyper Hug Mode takes visual
+  // priority over a random event if somehow both are true at once.
+  updateActiveEventBanner(hyperActive, event) {
+    const el = this.els["active-event-banner"];
+    if (hyperActive) {
+      el.textContent = "★ HYPER HUG MODE ★";
+      el.classList.remove("hidden");
+      el.classList.add("hyper");
+    } else if (event) {
+      el.textContent = event.def.name;
+      el.classList.remove("hidden");
+      el.classList.remove("hyper");
+    } else {
+      el.classList.add("hidden");
+      el.classList.remove("hyper");
+    }
   },
   compactHud: false,
   updateCompactHud() {
@@ -234,7 +280,7 @@ const UI = {
             <div class="inv-name">${e.name}</div>
             <div class="inv-desc">Active run modifier</div>
           </div>
-          <div class="inv-timer">${e.remaining.toFixed(1)}s</div>
+          <div class="inv-timer">${e.remaining === Infinity ? "rest of run" : e.remaining.toFixed(1) + "s"}</div>
         </div>`,
         );
       }
@@ -265,6 +311,29 @@ const UI = {
             : `<div class="arena-locked-text">\uD83D\uDD12 Unlock by reaching ${a.unlock.value} lifetime hugs (you have ${lifetime})</div>`
         }
       </div>`,
+      );
+    }
+  },
+  renderAchievements() {
+    const list = this.els["achievements-list"];
+    if (!list) return;
+    list.innerHTML = "";
+    const unlocked = SaveSystem.getUnlockedAchievements();
+    const unlockedCount = ACHIEVEMENTS.filter((a) => unlocked[a.id]).length;
+    this.els["ach-progress"].textContent =
+      unlockedCount + " / " + ACHIEVEMENTS.length + " unlocked";
+    for (const a of ACHIEVEMENTS) {
+      const got = !!unlocked[a.id];
+      const showHidden = a.hidden && !got;
+      list.insertAdjacentHTML(
+        "beforeend",
+        `<div class="ach-card ${got ? "unlocked" : "locked"}">
+          <div class="ach-icon">${iconHTML(a.icon, 30, "🏆")}</div>
+          <div class="ach-main">
+            <div class="ach-name">${showHidden ? "???" : a.name}</div>
+            <div class="ach-desc">${showHidden ? "Keep playing to discover this one." : a.desc}</div>
+          </div>
+        </div>`,
       );
     }
   },
@@ -315,6 +384,44 @@ const UI = {
         </div>`,
       );
     }
+    this.renderMpConnStatus();
+  },
+  // Live connection readout in the lobby. Only rendered when
+  // CONFIG.coop.debug is on — see that setting's comment in config.js.
+  renderMpConnStatus() {
+    const el = this.els["mp-conn-status"];
+    if (!el) return;
+    const dbg = CONFIG.coop && CONFIG.coop.debug;
+    if (!dbg || typeof Multiplayer === "undefined") {
+      el.textContent = "";
+      return;
+    }
+    const s = Multiplayer.status || {};
+    const relayOk = s.relaysOpen > 0;
+    let parts, title;
+    if (s.transport === "relay") {
+      // Relay mode needs no TURN and has no NAT problem, so the readout
+      // is much simpler: either the socket is up or it isn't.
+      parts = [
+        (relayOk ? "● " : "○ ") + "relay " + (relayOk ? "connected" : "down"),
+        "peers " + s.peerCount,
+      ];
+      title =
+        "Using your WebSocket relay — no NAT traversal, no TURN needed. " +
+        "This is the reliable path.";
+    } else {
+      parts = [
+        (relayOk ? "● " : "○ ") + "relays " + s.relaysOpen + "/" + s.relaysTotal,
+        "peers " + s.peerCount,
+        s.usingTurn ? "TURN on" : "TURN off",
+      ];
+      title = s.usingTurn
+        ? "Peer-to-peer with TURN — cross-network play should work."
+        : "Peer-to-peer with no TURN. Players on different networks may be unable to connect at all. Easiest fix: set CONFIG.coop.relayUrl (see js/config.js).";
+    }
+    el.textContent = parts.join("   ·   ");
+    el.className = relayOk ? "mp-conn-ok" : "mp-conn-bad";
+    el.title = title;
   },
   comboBanner(text) {
     const el = this.els["combo-banner"];
@@ -407,6 +514,11 @@ const UI = {
       rows.push(["Level Reached", stats.level]);
       rows.push(["Best Time", fmtTime(SaveSystem.getFullBest()) + "s"]);
     }
+    if (stats.hyperMode) rows.push(["Hyper Hug Mode", "★ Reached!"]);
+    if (stats.events && stats.events.length)
+      rows.push(["Events Triggered", stats.events.length]);
+    if (stats.achievements && stats.achievements.length)
+      rows.push(["Achievements Earned", stats.achievements.length]);
     this.els["results-stats"].innerHTML = rows
       .map((r) => `<div class="r-row"><span>${r[0]}</span><b>${r[1]}</b></div>`)
       .join("");

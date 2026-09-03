@@ -9,6 +9,8 @@ const SaveSystem = {
   KEY_SETTINGS: "bayatHug_settings",
   KEY_LIFETIME: "bayatHug_lifetimeHugs",
   KEY_MP_PROFILE: "bayatHug_mpProfile",
+  KEY_ACHIEVEMENTS: "bayatHug_achievements",
+  KEY_RELAY_URL: "bayatHug_relayUrl",
   // In-memory fallback used whenever localStorage isn't available (private
   // browsing on iOS Safari throws on every setItem, some Android WebViews
   // disable storage entirely, quota can fill up, etc). Scores still work
@@ -124,6 +126,40 @@ const SaveSystem = {
       this.safeSet(this.KEY_MP_PROFILE, JSON.stringify(profile));
     } catch (e) {}
   },
+  // Co-op relay URL, remembered between sessions so a changing tunnel
+  // URL doesn't mean editing config.js and redeploying every time.
+  // See Game.mpResolveRelayUrl() for the precedence rules.
+  getRelayUrl() {
+    const v = this.safeGet(this.KEY_RELAY_URL);
+    return v && /^wss?:\/\//i.test(v) ? v : null;
+  },
+  setRelayUrl(url) {
+    if (!url) {
+      this.safeRemove(this.KEY_RELAY_URL);
+      return;
+    }
+    // Only ever store something that looks like a websocket URL — this
+    // can come from a query string, so don't trust it blindly.
+    if (/^wss?:\/\//i.test(url)) this.safeSet(this.KEY_RELAY_URL, url.trim());
+  },
+  // Achievements — persisted as {id: true, ...} rather than an array so
+  // "is this unlocked" is an O(1) lookup everywhere it's checked.
+  getUnlockedAchievements() {
+    try {
+      const raw = this.safeGet(this.KEY_ACHIEVEMENTS);
+      if (raw) return JSON.parse(raw);
+    } catch (e) {}
+    return {};
+  },
+  unlockAchievement(id) {
+    const set = this.getUnlockedAchievements();
+    if (set[id]) return false; // already unlocked — tell the caller so they don't toast twice
+    set[id] = true;
+    try {
+      this.safeSet(this.KEY_ACHIEVEMENTS, JSON.stringify(set));
+    } catch (e) {}
+    return true;
+  },
 };
 
 /* =========================================================
@@ -236,5 +272,65 @@ const AudioSystem = {
   bombExplode() {
     this.tone(80, 0.4, "sawtooth", 0.26, 0);
     this.tone(60, 0.5, "square", 0.18, 0.06);
+  },
+  /* ---- Rare jumpscare ("Mr. Squeeze") ----
+     A dedicated sting rather than reusing danger() — this is the loudest,
+     nastiest sound in the game on purpose. Procedural like everything
+     else here (no audio file needed), BUT if you drop a real file in as
+     ASSETS.jumpscareSound it plays that instead — see playJumpscare().
+     Built from a downward frequency sweep (the classic "scare" swoop) +
+     a burst of detuned sawtooth noise on top. */
+  jumpscareTone(golden) {
+    if (!this.ctx || !this.settings.sfx) return;
+    const t0 = this.ctx.currentTime;
+    try {
+      // downward swoop
+      const osc = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      osc.type = golden ? "triangle" : "sawtooth";
+      osc.frequency.setValueAtTime(golden ? 900 : 760, t0);
+      osc.frequency.exponentialRampToValueAtTime(golden ? 220 : 55, t0 + 0.55);
+      g.gain.setValueAtTime(0, t0);
+      g.gain.linearRampToValueAtTime(0.32, t0 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.7);
+      osc.connect(g);
+      g.connect(this.master);
+      osc.start(t0);
+      osc.stop(t0 + 0.75);
+      // detuned dissonant stack — the "screech"
+      const partials = golden ? [523, 659, 784] : [180, 191, 233, 246];
+      partials.forEach((f, i) => {
+        this.tone(f, 0.45, golden ? "sine" : "sawtooth", 0.13, i * 0.015);
+      });
+      // low body thump
+      this.tone(48, 0.6, "square", 0.22, 0.02);
+    } catch (e) {
+      // Any WebAudio hiccup must never take down the frame that triggered
+      // the jumpscare — fall back to the generic danger sting.
+      this.danger();
+    }
+  },
+  /* Plays the jumpscare audio: a real audio FILE if one is configured and
+     loaded (ASSETS.jumpscareSound), otherwise the procedural sting above.
+     Same graceful-degradation philosophy as every sprite in this project —
+     a missing/failed audio file is never fatal, you just get the built-in
+     sound instead. */
+  playJumpscare(golden) {
+    if (!this.settings.sfx) return;
+    const el = Sounds && Sounds.jumpscare;
+    if (el && Sounds.jumpscareLoaded) {
+      try {
+        el.currentTime = 0;
+        el.volume = clamp((this.settings.volume || 70) / 100, 0, 1);
+        const p = el.play();
+        // play() returns a promise in modern browsers; a rejection (autoplay
+        // policy, decode error) should silently fall back, not throw.
+        if (p && p.catch) p.catch(() => this.jumpscareTone(golden));
+        return;
+      } catch (e) {
+        /* fall through to procedural */
+      }
+    }
+    this.jumpscareTone(golden);
   },
 };

@@ -35,6 +35,9 @@ const Multiplayer = {
   roomCode: null,
   isHost: false,
   selfId: null,
+  // "relay" | "p2p" | null — which transport is actually live. Set by
+  // _connect(); read by send()/on() and the diagnostics readout.
+  transport: null,
   // peerId -> {name, color} — populated as peers announce their profile.
   // A peer with no profile yet (announcement still in flight) is simply
   // absent from this map rather than present with placeholder data.
@@ -72,6 +75,18 @@ const Multiplayer = {
   // given. Never throws — a send on a dead/dropped connection should
   // degrade silently, same philosophy as everything else here.
   send(name, data, targetPeerId) {
+    if (this.transport === "relay") {
+      try {
+        if (this._ws && this._ws.readyState === WebSocket.OPEN) {
+          this._ws.send(
+            JSON.stringify({ type: "msg", action: name, data, to: targetPeerId }),
+          );
+        }
+      } catch (e) {
+        console.warn("[Multiplayer] relay send('" + name + "') failed:", e);
+      }
+      return;
+    }
     try {
       this._action(name).send(data, targetPeerId);
     } catch (e) {
@@ -91,6 +106,19 @@ const Multiplayer = {
   // place that unwraps meta.peerId — don't duplicate that unwrapping
   // elsewhere if Trystero's shape changes again, fix it here.
   on(name, handler) {
+    if (this.transport === "relay") {
+      // Relay path: one handler per action name, invoked from the
+      // socket's onmessage below. Wrapped so a throwing handler can't
+      // kill the socket loop.
+      this._relayHandlers[name] = (data, peerId) => {
+        try {
+          handler(data, peerId);
+        } catch (e) {
+          console.error("[Multiplayer] handler for '" + name + "' threw:", e);
+        }
+      };
+      return;
+    }
     try {
       this._action(name).onMessage = (data, meta) => {
         try {
@@ -112,6 +140,9 @@ const Multiplayer = {
       const mod = await import("https://esm.run/trystero");
       this._joinRoomFn = mod.joinRoom;
       this._selfIdFromLib = mod.selfId || null;
+      // Used by _startDiagnostics() to report how many signaling relays
+      // are actually connected — optional, guarded everywhere it's used.
+      this._getRelaySockets = mod.getRelaySockets || null;
       this.available = true;
       return true;
     } catch (e) {
@@ -125,15 +156,289 @@ const Multiplayer = {
     }
   },
 
+  /* Live connection diagnostics — the answer to "co-op is random and I
+     can't test it". Polls Trystero's relay sockets and reports how many
+     are actually OPEN, plus how many peers we can see. `status` is a
+     plain object other code (UI.renderMpPeerList) can read each frame;
+     nothing here affects gameplay. Only runs when CONFIG.coop.debug. */
+  status: { relaysOpen: 0, relaysTotal: 0, peerCount: 0, usingTurn: false },
+  _diagTimer: null,
+  _startDiagnostics() {
+    this._stopDiagnostics();
+    const tick = () => {
+      try {
+        let open = 0,
+          total = 0;
+        if (this._getRelaySockets) {
+          const sockets = this._getRelaySockets();
+          for (const url in sockets) {
+            total++;
+            // WebSocket.OPEN === 1
+            if (sockets[url] && sockets[url].readyState === 1) open++;
+          }
+        }
+        if (this.transport === "relay") {
+          const up = this._ws && this._ws.readyState === 1;
+          this.status = {
+            transport: "relay",
+            relaysOpen: up ? 1 : 0,
+            relaysTotal: 1,
+            peerCount: Object.keys(this.peers).length,
+            usingTurn: false, // relay needs no TURN at all
+          };
+        } else {
+          this.status = {
+            transport: this.transport || "p2p",
+            relaysOpen: open,
+            relaysTotal: total,
+            peerCount: Object.keys(this.peers).length,
+            usingTurn: !!this._usingTurn,
+          };
+        }
+      } catch (e) {
+        /* diagnostics must never break a run */
+      }
+    };
+    tick();
+    this._diagTimer = setInterval(tick, 1000);
+  },
+  _stopDiagnostics() {
+    if (this._diagTimer) clearInterval(this._diagTimer);
+    this._diagTimer = null;
+  },
+
+  /* Fetches short-lived TURN credentials from the Cloudflare Worker
+     (CONFIG.coop.turnCredentialsUrl — see worker/README.md), and merges
+     in any manually-configured servers from CONFIG.coop.turnServers.
+
+     NEVER throws and never blocks a run: if the Worker is missing,
+     misconfigured, unreachable, or slow, this resolves to whatever
+     static servers are configured (often none) and co-op proceeds on
+     plain peer-to-peer — i.e. exactly today's behaviour. TURN is an
+     upgrade, not a dependency.
+
+     Cached for the session: credentials are valid for an hour and each
+     fetch mints a new one, so re-fetching on every host/join would be
+     pure waste. */
+  _iceCache: null,
+  async _fetchTurnServers() {
+    const cfg = (typeof CONFIG !== "undefined" && CONFIG.coop) || {};
+    const manual = Array.isArray(cfg.turnServers) ? cfg.turnServers.slice() : [];
+    if (!cfg.turnCredentialsUrl) return manual;
+    if (this._iceCache) return this._iceCache.concat(manual);
+    try {
+      // Bounded wait — a hanging Worker must not stall the lobby.
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 6000);
+      const res = await fetch(cfg.turnCredentialsUrl, { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (!res.ok) {
+        console.warn(
+          "[Multiplayer] TURN worker returned " +
+            res.status +
+            " — continuing without TURN. See worker/README.md.",
+        );
+        return manual;
+      }
+      const data = await res.json();
+      // Keep only entries that actually carry credentials (Cloudflare
+      // also returns a bare STUN entry; Trystero supplies its own STUN,
+      // and turnConfig expects TURN servers).
+      const fetched = (data.iceServers || []).filter(
+        (s) => s && s.username && s.credential,
+      );
+      if (!fetched.length) {
+        console.warn("[Multiplayer] TURN worker returned no usable credentials.");
+        return manual;
+      }
+      this._iceCache = fetched;
+      return fetched.concat(manual);
+    } catch (e) {
+      console.warn(
+        "[Multiplayer] Couldn't reach the TURN worker (" +
+          (e && e.name === "AbortError" ? "timed out" : e) +
+          ") — continuing without TURN.",
+      );
+      return manual;
+    }
+  },
+
+  /* =========================================================
+     TRANSPORT: WEBSOCKET RELAY  (server/relay-server.js)
+     =========================================================
+     The reliable alternative to peer-to-peer. Both players open an
+     OUTBOUND WebSocket to a relay you control — outbound connections
+     always work, so there is no NAT traversal to fail and no TURN
+     server (and therefore no credentials) involved at all.
+
+     Presents exactly the same surface as the Trystero path — selfId,
+     peers, onPeerJoin/onPeerLeave/onPeerProfile, send(), on() — so
+     nothing in game.js knows or cares which transport is live.
+     ========================================================= */
+  _ws: null,
+  _relayHandlers: {},
+
+  _connectRelay(code, hosting, profile) {
+    return new Promise((resolve, reject) => {
+      const base = (CONFIG.coop && CONFIG.coop.relayUrl) || "";
+      if (!base) return reject(new Error("no-relay-url"));
+      const url = base.replace(/\/+$/, "") + "/room/" + encodeURIComponent(code);
+
+      let ws;
+      try {
+        ws = new WebSocket(url);
+      } catch (e) {
+        return reject(e);
+      }
+      this._ws = ws;
+
+      // Don't hang the lobby forever on an unreachable relay.
+      const timeout = setTimeout(() => {
+        try {
+          ws.close();
+        } catch {}
+        reject(new Error("relay-timeout"));
+      }, 8000);
+
+      ws.onopen = () => {
+        if (CONFIG.coop && CONFIG.coop.debug) {
+          console.log("[Multiplayer] relay socket open ->", url);
+        }
+      };
+
+      ws.onmessage = (ev) => {
+        let msg;
+        try {
+          msg = JSON.parse(ev.data);
+        } catch {
+          return;
+        }
+        if (msg.type === "welcome") {
+          clearTimeout(timeout);
+          this.selfId = msg.selfId;
+          // Peers already in the room. Their profiles arrive separately
+          // (each side sends `profile` on join), same as the P2P path.
+          for (const pid of msg.peers || []) {
+            if (this.onPeerJoin) {
+              try {
+                this.onPeerJoin(pid);
+              } catch (e) {
+                console.error("[Multiplayer] onPeerJoin handler threw:", e);
+              }
+            }
+            this.send("profile", profile, pid);
+          }
+          resolve(true);
+        } else if (msg.type === "peerJoin") {
+          this.send("profile", profile, msg.peerId);
+          if (this.onPeerJoin) {
+            try {
+              this.onPeerJoin(msg.peerId);
+            } catch (e) {
+              console.error("[Multiplayer] onPeerJoin handler threw:", e);
+            }
+          }
+        } else if (msg.type === "peerLeave") {
+          delete this.peers[msg.peerId];
+          if (this.onPeerLeave) {
+            try {
+              this.onPeerLeave(msg.peerId);
+            } catch (e) {
+              console.error("[Multiplayer] onPeerLeave handler threw:", e);
+            }
+          }
+        } else if (msg.type === "full") {
+          clearTimeout(timeout);
+          reject(new Error("room-full"));
+        } else if (msg.type === "msg") {
+          // `profile` is handled here rather than by Game so the peers
+          // map is populated identically on both transports.
+          if (msg.action === "profile") {
+            if (msg.data && typeof msg.data.name === "string") {
+              this.peers[msg.from] = msg.data;
+              if (this.onPeerProfile) {
+                try {
+                  this.onPeerProfile(msg.from, msg.data);
+                } catch (e) {
+                  console.error("[Multiplayer] onPeerProfile handler threw:", e);
+                }
+              }
+            }
+            return;
+          }
+          const h = this._relayHandlers[msg.action];
+          if (h) h(msg.data, msg.from);
+        }
+      };
+
+      ws.onerror = () => {
+        clearTimeout(timeout);
+        reject(new Error("relay-error"));
+      };
+
+      ws.onclose = () => {
+        clearTimeout(timeout);
+        // A mid-session drop: surface every peer as having left so the
+        // lobby/run doesn't show ghosts.
+        for (const pid of Object.keys(this.peers)) {
+          delete this.peers[pid];
+          if (this.onPeerLeave) {
+            try {
+              this.onPeerLeave(pid);
+            } catch {}
+          }
+        }
+      };
+    });
+  },
+
   async _connect(code, hosting, profile) {
-    const ok = await this._loadLib();
-    if (!ok) throw new Error("multiplayer-unavailable");
     this.leave();
     this.roomCode = code;
     this.isHost = hosting;
-    this.selfId = this._selfIdFromLib;
     this.peers = {};
     this._actions = {};
+    this._relayHandlers = {};
+
+    /* ---- Transport selection (CONFIG.coop.transport) ----
+       "auto"  — use the relay if one is configured, else P2P. If the
+                 relay is unreachable, fall back to P2P rather than
+                 failing outright: a degraded connection beats none.
+       "relay" — relay only; error if it's down (useful for testing).
+       "p2p"   — original Trystero behaviour, ignores relayUrl. */
+    const coopCfg = (typeof CONFIG !== "undefined" && CONFIG.coop) || {};
+    const mode = coopCfg.transport || "auto";
+    const relayConfigured = !!coopCfg.relayUrl;
+
+    if (relayConfigured && (mode === "auto" || mode === "relay")) {
+      try {
+        this.transport = "relay";
+        await this._connectRelay(code, hosting, profile);
+        if (coopCfg.debug) {
+          console.log(
+            "[Multiplayer] room '" + code + "' | host=" + hosting +
+              " | transport=RELAY (no NAT traversal, no TURN needed)",
+          );
+          this._startDiagnostics();
+        }
+        return true;
+      } catch (e) {
+        this.transport = null;
+        this._ws = null;
+        if (mode === "relay") throw e; // caller explicitly demanded the relay
+        console.warn(
+          "[Multiplayer] Relay unreachable (" +
+            (e && e.message) +
+            ") — falling back to peer-to-peer.",
+        );
+      }
+    }
+
+    // ---- Peer-to-peer (Trystero) ----
+    this.transport = "p2p";
+    const ok = await this._loadLib();
+    if (!ok) throw new Error("multiplayer-unavailable");
+    this.selfId = this._selfIdFromLib;
     try {
       // Trystero's nostr strategy only connects each client to `redundancy`
       // relays picked randomly out of its ~45-relay default pool — the
@@ -147,10 +452,43 @@ const Multiplayer = {
       // cost of a few more short-lived WebSocket connections, which is a
       // trivial cost for a casual browser game. See CLAUDE.md
       // "Multiplayer" bug history before lowering this back down.
-      this.room = this._joinRoomFn(
-        { appId: MP_APP_ID, relayConfig: { redundancy: 20 } },
-        code,
-      );
+      // Tunable via CONFIG.coop.relayRedundancy (js/config.js). Falls
+      // back to 20 if config.js somehow didn't load — this module is the
+      // one ES-module file and can in principle execute before/without
+      // the classic scripts in an odd load order, so it never assumes.
+      const coopCfg = (typeof CONFIG !== "undefined" && CONFIG.coop) || {};
+      const redundancy = coopCfg.relayRedundancy || 20;
+      const roomCfg = { appId: MP_APP_ID, relayConfig: { redundancy } };
+      // TURN is what makes co-op work between players on DIFFERENT
+      // networks — the relays above only handle finding each other;
+      // TURN relays the actual gameplay traffic when direct P2P can't
+      // punch through NAT. See CONFIG.coop.turnCredentialsUrl in
+      // js/config.js. `turnConfig` (rather than rtcConfig) is used
+      // deliberately so Trystero keeps its own default STUN servers as
+      // an additional path rather than us replacing the whole ICE list.
+      const turn = await this._fetchTurnServers();
+      if (Array.isArray(turn) && turn.length) {
+        roomCfg.turnConfig = turn;
+        this._usingTurn = true;
+      } else {
+        this._usingTurn = false;
+      }
+      this.room = this._joinRoomFn(roomCfg, code);
+      if (coopCfg.debug) {
+        console.log(
+          "[Multiplayer] room '" +
+            code +
+            "' | host=" +
+            hosting +
+            " | relay redundancy=" +
+            redundancy +
+            " | TURN=" +
+            (this._usingTurn
+              ? turn.length + " server(s)"
+              : "NONE (cross-network joins may fail — see CONFIG.coop.turnServers)"),
+        );
+        this._startDiagnostics();
+      }
     } catch (e) {
       console.error("[Multiplayer] joinRoom() threw:", e);
       this.room = null;
@@ -210,6 +548,22 @@ const Multiplayer = {
   },
 
   leave() {
+    this._stopDiagnostics();
+    if (this._ws) {
+      try {
+        // Null the handlers first so the close event doesn't fire the
+        // peer-left cascade for a teardown we initiated.
+        this._ws.onclose = null;
+        this._ws.onerror = null;
+        this._ws.onmessage = null;
+        this._ws.close();
+      } catch (e) {
+        console.warn("[Multiplayer] relay socket close threw (ignoring):", e);
+      }
+      this._ws = null;
+    }
+    this._relayHandlers = {};
+    this.transport = null;
     if (this.room) {
       try {
         this.room.leave();
