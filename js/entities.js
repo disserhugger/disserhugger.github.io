@@ -564,6 +564,28 @@ class Bayat {
   // cosmetic and doesn't need to be network-accurate.
   updatePuppet(dt) {
     this.animT += dt * 6;
+    // MUST advance spawnT here too. draw() scales the sprite by it for
+    // the spawn-in pop (`const s = this.spawnT < 1 ? this.spawnT : 1`),
+    // and it starts at 0.001 — so a puppet that never advances it is
+    // drawn at 1/1000th size, i.e. completely invisible. That was the
+    // "non-host players can't see any Bayats" bug: the Bayats were
+    // present, alive and correctly positioned the whole time, just
+    // scaled to nothing. Any future per-frame visual state added to
+    // update() needs mirroring here for the same reason.
+    if (this.spawnT < 1) this.spawnT = Math.min(1, this.spawnT + dt * 3.2);
+    // Same reasoning for the CC/flash timers: update() is the only place
+    // that decays them, and a non-host's own tools still SET them on
+    // puppets (tools.js writes frozenT/slowT/etc to whatever is in the
+    // list). Without decay here, one Gem of Time would leave every Bayat
+    // frozen-tinted on the joiner's screen for the rest of the run.
+    // Only the timers are decayed — never the movement they drive in
+    // update(), because a puppet's position is the host's to decide.
+    if (this.frozenT > 0) this.frozenT -= dt;
+    if (this.stunT > 0) this.stunT -= dt;
+    if (this.slowT > 0) this.slowT -= dt;
+    if (this.hookedT > 0) this.hookedT -= dt;
+    if (this.anchorT > 0) this.anchorT -= dt;
+    if (this.throwFlashT > 0) this.throwFlashT -= dt;
     if (this.netTargetX == null) return; // no snapshot yet — stay put
     const t = Math.min(1, dt * 10);
     this.x = lerp(this.x, this.netTargetX, t);
