@@ -413,11 +413,11 @@ const UI = {
       parts = [
         (relayOk ? "● " : "○ ") + "relays " + s.relaysOpen + "/" + s.relaysTotal,
         "peers " + s.peerCount,
-        s.usingTurn ? "TURN on" : "TURN off",
+        "P2P",
       ];
-      title = s.usingTurn
-        ? "Peer-to-peer with TURN — cross-network play should work."
-        : "Peer-to-peer with no TURN. Players on different networks may be unable to connect at all. Easiest fix: set CONFIG.coop.relayUrl (see js/config.js).";
+      title =
+        "Peer-to-peer fallback. Players on different networks often can't " +
+        "connect this way. Fix: set CONFIG.coop.relayUrl — see MULTIPLAYER.md.";
     }
     el.textContent = parts.join("   ·   ");
     el.className = relayOk ? "mp-conn-ok" : "mp-conn-bad";
@@ -473,29 +473,6 @@ const UI = {
   },
   hideUpgradeModal() {
     this.els["upgrade-modal"].classList.remove("show");
-  },
-  showChaosModal(rewards, onPick) {
-    this.els["um-title"].textContent = "\uD83C\uDF08 CHAOS CHEST! \uD83C\uDF08";
-    this.els["um-sub"].textContent = "pick 1 of 5 random rewards";
-    const row = this.els["um-cards"];
-    row.innerHTML = "";
-    rewards.forEach((r) => {
-      const card = document.createElement("div");
-      card.className = "up-card rare";
-      card.style.boxShadow = `0 0 0 2px ${r.rarity.color}, 6px 6px 0 rgba(0,0,0,.55)`;
-      card.innerHTML = `<div class="eyebrow" style="background:${r.rarity.color};color:#08060d;">${r.rarity.name.toUpperCase()}</div>
-        <div class="icon">${iconHTML(r.def ? r.def.id : null, 40, r.icon)}</div>
-        <div class="name">${r.name}</div>
-        <div class="lvl-tag" style="color:${r.rarity.color};">${r.instant ? "INSTANT" : "BOOST"}</div>
-        <div class="desc">${r.desc}</div>
-        <div class="select-btn">Take It</div>`;
-      card.onclick = () => {
-        AudioSystem.click();
-        onPick(r);
-      };
-      row.appendChild(card);
-    });
-    this.els["upgrade-modal"].classList.add("show");
   },
   showResults(mode, stats, isRecord) {
     this.showScreen("screen-results");

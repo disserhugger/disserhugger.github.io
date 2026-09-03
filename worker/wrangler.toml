@@ -6,10 +6,7 @@
 #   npx wrangler login
 #   npx wrangler deploy
 #
-# Full walkthrough: worker/README-relay.md
-#
-# (The optional TURN-credential worker has its own config now:
-#  wrangler-turn.toml — you do NOT need it when using this relay.)
+# Full walkthrough: MULTIPLAYER.md
 
 name = "bayat-coop-relay"
 main = "relay-worker.js"

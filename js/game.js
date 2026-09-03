@@ -2257,19 +2257,6 @@ const Game = {
       if (lv.length) this.queueLevelUps(lv.length);
     }
   },
-  applyCurse() {
-    const curse = choice(CURSES);
-    curse.apply(this.player);
-    this.tempEffects.push({
-      id: curse.id,
-      name: curse.name,
-      icon: curse.icon,
-      remaining: curse.duration,
-      duration: curse.duration,
-      revert: curse.revert,
-    });
-    UI.toast("\u26A0 CURSED: " + curse.name + " \u26A0", 2200);
-  },
   /* Adds a timed player effect. If one with the same id is already active,
      its duration is simply refreshed (apply() is NOT re-run) so effects
      like the snowball slow can't stack into an ever-growing multiplier —

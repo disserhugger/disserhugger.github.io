@@ -1,9 +1,10 @@
 /* =========================================================
    CLOUDFLARE RELAY — Worker + Durable Object
    =========================================================
-   The co-op relay, running on Cloudflare's free Workers plan. Same wire
-   protocol as server/relay-server.js, so the game client can't tell them
-   apart — you can switch hosts by changing one URL.
+   The co-op relay, running on Cloudflare's free Workers plan. The wire
+   protocol is deliberately simple and host-agnostic, so this can be
+   ported to any WebSocket host by changing one URL in js/config.js —
+   the game client never knows which server it's talking to.
 
    WHY DURABLE OBJECTS: a plain Worker is stateless and each request may
    hit a different machine, so it has nowhere to keep "who is in this
@@ -22,7 +23,7 @@
    one that wanted a credit card). Workers + Durable Objects + Pages are
    all on the free plan. You do not need TURN at all when using a relay.
 
-   DEPLOY: see worker/README-relay.md (~5 minutes).
+   DEPLOY: see MULTIPLAYER.md (~5 minutes).
    ========================================================= */
 
 const MAX_ROOM_SIZE = 8;

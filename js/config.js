@@ -172,32 +172,31 @@ const CONFIG = {
 
   // ---- co-op multiplayer (see js/multiplayer.js + CLAUDE.md) ----
   coop: {
-    /* ★★★ THE RELIABLE OPTION — START HERE ★★★
+    /* ★★★ CO-OP SETUP — THIS IS THE ONE SETTING THAT MATTERS ★★★
        ------------------------------------------------------------------
-       Set this and co-op just works, everywhere, with NO TURN server and
-       NO credentials of any kind to manage, protect, or leak.
+       Set this to your deployed relay and co-op works reliably between
+       any two players, on any networks, with no credentials anywhere.
 
        Why it works when peer-to-peer doesn't: P2P asks two players'
        routers to accept a DIRECT connection, and many routers (and most
        mobile carriers) refuse — that's the "works on the same wifi,
        random across networks" problem. With a relay, both players make
        an OUTBOUND connection instead, exactly like loading a web page.
-       Outbound always works. Nothing to traverse, nothing to
-       authenticate, nothing secret to store.
+       Outbound always works.
 
-       SETUP (~3 minutes, free, no credit card):
-         1. https://console.deno.com — sign in with GitHub
-            (NOT dash.deno.com — that's the retired "Deploy Classic",
-             whose signup is closed and returns 403 SIGNUP_UNAVAILABLE)
-         2. New Playground, paste server/relay-server.js, deploy
-         3. Put the URL here as wss:// (NOT https://)
+       Your game stays on GitHub Pages either way — the relay is just
+       something the page connects out to.
 
-         relayUrl: "wss://your-app.deno.dev",
+       SETUP: see MULTIPLAYER.md (about 5 minutes, free, no credit card).
+       Short version:
+         cd worker && npx wrangler login && npx wrangler deploy
+       then paste the printed URL here as wss:// (NOT https://):
 
-       Deno Deploy's free tier (~1M requests, 100 GB/month) is far beyond
-       what this game uses. Any WebSocket-capable host works — the server
-       is ~150 lines and holds no state. */
-    relayUrl: null,
+         relayUrl: "wss://bayat-coop-relay.YOUR-SUBDOMAIN.workers.dev",
+
+       Left null, co-op falls back to peer-to-peer, which often fails
+       between different networks. */
+    relayUrl: "wss://bayat-coop-relay.bayathugger.workers.dev",
 
     /* "auto"  — use relayUrl if set, else peer-to-peer; if the relay is
                  unreachable, quietly fall back to P2P.
@@ -217,59 +216,6 @@ const CONFIG = {
     // at the cost of more websocket connections. Don't lower this
     // without re-testing joins repeatedly. See CLAUDE.md bug history.
     relayRedundancy: 20,
-
-    /* ★★ TURN — THE FIX FOR "CO-OP ONLY WORKS ON THE SAME WIFI" ★★
-       ------------------------------------------------------------------
-       Relays (above) only handle the *introduction*. Once two peers have
-       found each other, the actual gameplay connection is direct WebRTC,
-       which has to punch through both players' routers. STUN (free,
-       automatic) handles the easy NAT types. It CANNOT handle symmetric
-       NAT — very common on mobile data and plenty of home routers. When
-       either side has one, the peers find each other fine and then
-       simply never connect.
-
-       That is exactly the "works on the same network, random across
-       networks, impossible to test" behaviour: it depends on the NAT
-       types of the two specific players, which neither of you controls.
-       A TURN server (which *relays* traffic when direct fails) is the
-       only real fix.
-
-       FULL SETUP GUIDE: worker/README.md (provider comparison + steps).
-
-       ---- Option A: paste credentials here (simplest, ~5 minutes) ----
-       Sign up with a TURN provider that has a free tier and issues a
-       fixed username/password, then fill this in:
-
-         - ExpressTURN  https://www.expressturn.com/   1000 GB/mo free
-         - Metered      https://www.metered.ca/tools/openrelay/  20 GB/mo
-
-         turnServers: [
-           {
-             urls: [
-               "turn:relay.expressturn.com:3478",
-               "turn:relay.expressturn.com:443",
-             ],
-             username: "YOUR_USERNAME",
-             credential: "YOUR_PASSWORD",
-           },
-         ],
-
-       Listing several providers is fine and gives redundancy if one is
-       blocked or down.
-
-       TRADEOFF: credentials put here are visible in your public repo and
-       in players' devtools. For a free-tier account that's usually an
-       acceptable risk (bounded quota, rotatable) — but if you'd rather
-       keep them out of the repo, use Option B. */
-    turnServers: [],
-
-    /* ---- Option B: serve credentials from an endpoint instead ----
-       Point this at the small endpoint in worker/ and your repo contains
-       only a URL. It works with any provider, and also supports
-       Cloudflare's short-lived-credential API (the only genuinely
-       expiring option, but Cloudflare signup requires a credit card).
-       Deployable to Cloudflare Workers, Deno Deploy, Val Town, etc. */
-    turnCredentialsUrl: null, // e.g. "https://bayat-turn.you.workers.dev"
 
     playerStateHz: 12, // how often you broadcast your own position
     bayatSnapshotHz: 8, // how often the host broadcasts Bayat positions

@@ -161,7 +161,7 @@ const Multiplayer = {
      are actually OPEN, plus how many peers we can see. `status` is a
      plain object other code (UI.renderMpPeerList) can read each frame;
      nothing here affects gameplay. Only runs when CONFIG.coop.debug. */
-  status: { relaysOpen: 0, relaysTotal: 0, peerCount: 0, usingTurn: false },
+  status: { transport: null, relaysOpen: 0, relaysTotal: 0, peerCount: 0 },
   _diagTimer: null,
   _startDiagnostics() {
     this._stopDiagnostics();
@@ -184,7 +184,6 @@ const Multiplayer = {
             relaysOpen: up ? 1 : 0,
             relaysTotal: 1,
             peerCount: Object.keys(this.peers).length,
-            usingTurn: false, // relay needs no TURN at all
           };
         } else {
           this.status = {
@@ -192,7 +191,6 @@ const Multiplayer = {
             relaysOpen: open,
             relaysTotal: total,
             peerCount: Object.keys(this.peers).length,
-            usingTurn: !!this._usingTurn,
           };
         }
       } catch (e) {
@@ -207,64 +205,8 @@ const Multiplayer = {
     this._diagTimer = null;
   },
 
-  /* Fetches short-lived TURN credentials from the Cloudflare Worker
-     (CONFIG.coop.turnCredentialsUrl — see worker/README.md), and merges
-     in any manually-configured servers from CONFIG.coop.turnServers.
-
-     NEVER throws and never blocks a run: if the Worker is missing,
-     misconfigured, unreachable, or slow, this resolves to whatever
-     static servers are configured (often none) and co-op proceeds on
-     plain peer-to-peer — i.e. exactly today's behaviour. TURN is an
-     upgrade, not a dependency.
-
-     Cached for the session: credentials are valid for an hour and each
-     fetch mints a new one, so re-fetching on every host/join would be
-     pure waste. */
-  _iceCache: null,
-  async _fetchTurnServers() {
-    const cfg = (typeof CONFIG !== "undefined" && CONFIG.coop) || {};
-    const manual = Array.isArray(cfg.turnServers) ? cfg.turnServers.slice() : [];
-    if (!cfg.turnCredentialsUrl) return manual;
-    if (this._iceCache) return this._iceCache.concat(manual);
-    try {
-      // Bounded wait — a hanging Worker must not stall the lobby.
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 6000);
-      const res = await fetch(cfg.turnCredentialsUrl, { signal: ctrl.signal });
-      clearTimeout(timer);
-      if (!res.ok) {
-        console.warn(
-          "[Multiplayer] TURN worker returned " +
-            res.status +
-            " — continuing without TURN. See worker/README.md.",
-        );
-        return manual;
-      }
-      const data = await res.json();
-      // Keep only entries that actually carry credentials (Cloudflare
-      // also returns a bare STUN entry; Trystero supplies its own STUN,
-      // and turnConfig expects TURN servers).
-      const fetched = (data.iceServers || []).filter(
-        (s) => s && s.username && s.credential,
-      );
-      if (!fetched.length) {
-        console.warn("[Multiplayer] TURN worker returned no usable credentials.");
-        return manual;
-      }
-      this._iceCache = fetched;
-      return fetched.concat(manual);
-    } catch (e) {
-      console.warn(
-        "[Multiplayer] Couldn't reach the TURN worker (" +
-          (e && e.name === "AbortError" ? "timed out" : e) +
-          ") — continuing without TURN.",
-      );
-      return manual;
-    }
-  },
-
   /* =========================================================
-     TRANSPORT: WEBSOCKET RELAY  (server/relay-server.js)
+     TRANSPORT: WEBSOCKET RELAY  (worker/relay-worker.js)
      =========================================================
      The reliable alternative to peer-to-peer. Both players open an
      OUTBOUND WebSocket to a relay you control — outbound connections
@@ -459,20 +401,11 @@ const Multiplayer = {
       const coopCfg = (typeof CONFIG !== "undefined" && CONFIG.coop) || {};
       const redundancy = coopCfg.relayRedundancy || 20;
       const roomCfg = { appId: MP_APP_ID, relayConfig: { redundancy } };
-      // TURN is what makes co-op work between players on DIFFERENT
-      // networks — the relays above only handle finding each other;
-      // TURN relays the actual gameplay traffic when direct P2P can't
-      // punch through NAT. See CONFIG.coop.turnCredentialsUrl in
-      // js/config.js. `turnConfig` (rather than rtcConfig) is used
-      // deliberately so Trystero keeps its own default STUN servers as
-      // an additional path rather than us replacing the whole ICE list.
-      const turn = await this._fetchTurnServers();
-      if (Array.isArray(turn) && turn.length) {
-        roomCfg.turnConfig = turn;
-        this._usingTurn = true;
-      } else {
-        this._usingTurn = false;
-      }
+      // NOTE: this path has no TURN server, so it can only connect peers
+      // whose networks allow direct WebRTC. That's the whole reason the
+      // relay transport above exists and is the default — see
+      // MULTIPLAYER.md. Trystero's own default STUN servers are still
+      // used, which covers the easier NAT types.
       this.room = this._joinRoomFn(roomCfg, code);
       if (coopCfg.debug) {
         console.log(
@@ -480,12 +413,9 @@ const Multiplayer = {
             code +
             "' | host=" +
             hosting +
-            " | relay redundancy=" +
+            " | transport=P2P | relay redundancy=" +
             redundancy +
-            " | TURN=" +
-            (this._usingTurn
-              ? turn.length + " server(s)"
-              : "NONE (cross-network joins may fail — see CONFIG.coop.turnServers)"),
+            " | no TURN (cross-network joins may fail — set CONFIG.coop.relayUrl)",
         );
         this._startDiagnostics();
       }
