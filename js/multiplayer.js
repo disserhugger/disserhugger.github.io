@@ -33,6 +33,65 @@ const Multiplayer = {
   available: false,
   room: null,
   roomCode: null,
+  /* Live netcode telemetry, so "co-op feels bad" can become a number
+     instead of a guess. Filled in by the ping/pong below and by every
+     inbound message; read by UI.renderNetStats() (toggle in-game with N).
+     Costs one tiny message every pingIntervalMs and nothing else. */
+  netStats: {
+    rttMs: 0,
+    rttMin: 0,
+    rttMax: 0,
+    jitterMs: 0,
+    msgsPerSec: 0,
+    lastSnapshotAgeMs: 0,
+    samples: [],
+  },
+  _pingTimer: null,
+  _msgWindow: [],
+  _startNetStats() {
+    this._stopNetStats();
+    const cfg = (typeof CONFIG !== "undefined" && CONFIG.coop) || {};
+    this._pingTimer = setInterval(() => {
+      /* Addressed to OURSELVES on purpose. The relay's targeted-send path
+         looks the recipient up in the room's peer map, which includes the
+         sender — verified against the deployed Worker (124ms round trip
+         solo). That measures the true client->relay->client path with no
+         second player present and no cooperation from anyone, so ping is
+         live the moment you open a lobby.
+
+         (An earlier version broadcast the ping and waited for a peer to
+         echo it, which silently reported nothing at all while you were
+         alone — exactly when you most want to check your connection.) */
+      if (!this.selfId) return;
+      this.send("__ping", { t: performance.now() }, this.selfId);
+    }, cfg.pingIntervalMs || 2000);
+  },
+  _stopNetStats() {
+    if (this._pingTimer) clearInterval(this._pingTimer);
+    this._pingTimer = null;
+  },
+  _recordRtt(ms) {
+    const st = this.netStats;
+    st.rttMs = Math.round(ms);
+    st.samples.push(ms);
+    if (st.samples.length > 20) st.samples.shift();
+    const arr = st.samples;
+    st.rttMin = Math.round(Math.min(...arr));
+    st.rttMax = Math.round(Math.max(...arr));
+    // Jitter = mean absolute deviation between consecutive samples; it's
+    // what actually causes stutter, and it's often the real culprit when
+    // a decent average ping still feels bad.
+    let j = 0;
+    for (let i = 1; i < arr.length; i++) j += Math.abs(arr[i] - arr[i - 1]);
+    st.jitterMs = arr.length > 1 ? Math.round(j / (arr.length - 1)) : 0;
+  },
+  _countMsg() {
+    const now = performance.now();
+    this._msgWindow.push(now);
+    while (this._msgWindow.length && now - this._msgWindow[0] > 1000)
+      this._msgWindow.shift();
+    this.netStats.msgsPerSec = this._msgWindow.length;
+  },
   isHost: false,
   selfId: null,
   // "relay" | "p2p" | null — which transport is actually live. Set by
@@ -308,6 +367,30 @@ const Multiplayer = {
             }
             return;
           }
+          this._countMsg();
+          // Echo pings straight back so the sender can time a real
+          // round trip; swallow our own returning echo to record it.
+          if (msg.action === "__ping") {
+            // Our own ping coming back: that's the RTT sample. A ping
+            // from someone else is echoed so THEY can measure theirs.
+            if (msg.from === this.selfId) {
+              if (msg.data && msg.data.t)
+                this._recordRtt(performance.now() - msg.data.t);
+            } else {
+              this.send("__pong", msg.data, msg.from);
+            }
+            return;
+          }
+          if (msg.action === "__pong") {
+            if (msg.data && msg.data.t) this._recordRtt(performance.now() - msg.data.t);
+            return;
+          }
+          if (msg.action === "bayatSnapshot") {
+            const now = performance.now();
+            if (this._lastSnapAt)
+              this.netStats.lastSnapshotAgeMs = Math.round(now - this._lastSnapAt);
+            this._lastSnapAt = now;
+          }
           const h = this._relayHandlers[msg.action];
           if (h) h(msg.data, msg.from);
         }
@@ -356,6 +439,7 @@ const Multiplayer = {
       try {
         this.transport = "relay";
         await this._connectRelay(code, hosting, profile);
+        this._startNetStats();
         if (coopCfg.debug) {
           console.log(
             "[Multiplayer] room '" + code + "' | host=" + hosting +
@@ -479,6 +563,7 @@ const Multiplayer = {
 
   leave() {
     this._stopDiagnostics();
+    this._stopNetStats();
     if (this._ws) {
       try {
         // Null the handlers first so the close event doesn't fire the

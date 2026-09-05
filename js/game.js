@@ -185,6 +185,12 @@ const Game = {
       if (k === "j" && this.state === "playing" && this.jumpscareT <= 0) {
         this.triggerJumpscare(e.shiftKey ? true : undefined);
       }
+      // Netcode diagnostics overlay (co-op only) — turns "it feels laggy"
+      // into ping/jitter/snapshot numbers. See UI.renderNetStats().
+      if (k === "n" && this.coop) {
+        UI.netStatsVisible = !UI.netStatsVisible;
+        UI.renderNetStats();
+      }
     });
     window.addEventListener("keyup", (e) => {
       const k = e.key.toLowerCase();
@@ -526,6 +532,9 @@ const Game = {
       this.mpOnPlayerState(data, peerId),
     );
     Multiplayer.on("bayatSnapshot", (data) => this.mpOnBayatSnapshot(data));
+    Multiplayer.on("bayatEffect", (data, peerId) =>
+      this.mpOnBayatEffect(data, peerId),
+    );
     Multiplayer.on("hugClaim", (data, peerId) =>
       this.mpOnHugClaim(data, peerId),
     );
@@ -698,14 +707,45 @@ const Game = {
       this.mpBayatNetTimer -= dt;
       if (this.mpBayatNetTimer <= 0) {
         this.mpBayatNetTimer = 1 / CONFIG.coop.bayatSnapshotHz;
-        const list = this.bayats.list
-          .filter((n) => n.alive)
-          .map((n) => ({
+        /* Only send Bayats some player could plausibly see. Measured on a
+           full arena: 100 Bayats = ~4KB per snapshot = ~118 MB/hour, and
+           ~68% of that was Bayats nobody was anywhere near. Culling pays
+           for a much higher tick rate at LOWER total bandwidth, which is
+           what actually reduces felt latency.
+
+           The radius is deliberately far larger than the viewport
+           (CONFIG.coop.snapshotCullRadius) so Bayats materialise well
+           off-screen — a tight cull would pop them in at the screen edge,
+           since a re-added id is a fresh object and replays its spawn-in
+           animation from scratch. */
+        const anchors = [this.player, ...Object.values(this.mpPeers)];
+        /* Radius is derived from the ACTUAL viewport, not a fixed guess:
+           anything within half the screen diagonal is on-screen, so that
+           plus a margin is exactly "could plausibly be seen soon". A
+           hardcoded number either culls nothing on a small screen (the
+           first attempt at 1800 covered 58% of the arena and saved only
+           30%) or clips visible Bayats on an ultrawide. */
+        const halfDiag = Math.hypot(this.camera.w, this.camera.h) / 2;
+        const cull = Math.max(
+          CONFIG.coop.snapshotCullMargin + halfDiag,
+          CONFIG.coop.snapshotCullMin,
+        );
+        const cull2 = cull * cull;
+        const list = [];
+        for (const n of this.bayats.list) {
+          if (!n.alive) continue;
+          let visible = false;
+          for (const a of anchors) {
+            if (a && dist2(n.x, n.y, a.x, a.y) <= cull2) { visible = true; break; }
+          }
+          if (!visible) continue;
+          list.push({
             id: n.id,
             t: n.type.key,
             x: Math.round(n.x),
             y: Math.round(n.y),
-          }));
+          });
+        }
         Multiplayer.send("bayatSnapshot", {
           list,
           difficulty: this.bayats.difficulty(this.elapsed),
@@ -715,9 +755,35 @@ const Game = {
     for (const id in this.mpPeers) {
       const p = this.mpPeers[id];
       if (p.targetX == null) continue; // no network sample yet — stay at spawn
-      const t = Math.min(1, dt * 10);
-      p.x = lerp(p.x, p.targetX, t);
-      p.y = lerp(p.y, p.targetY, t);
+      /* Snapshot interpolation, same model as Bayat.updatePuppet() —
+         render between two positions the peer actually reported rather
+         than guessing ahead. A human changing direction is just as
+         unpredictable as a Bayat's wander, so extrapolating them
+         overshoots on every turn. */
+      const buf = p.netBuf;
+      if (buf && buf.length) {
+        const renderAt = performance.now() - Game.mpInterpDelay();
+        const newest = buf[buf.length - 1];
+        if (renderAt >= newest.t) {
+          p.x = newest.x;
+          p.y = newest.y;
+        } else if (renderAt <= buf[0].t) {
+          p.x = buf[0].x;
+          p.y = buf[0].y;
+        } else {
+          for (let i = buf.length - 1; i > 0; i--) {
+            const b = buf[i],
+              a = buf[i - 1];
+            if (renderAt >= a.t && renderAt <= b.t) {
+              const span = b.t - a.t;
+              const f = span > 0 ? (renderAt - a.t) / span : 1;
+              p.x = a.x + (b.x - a.x) * f;
+              p.y = a.y + (b.y - a.y) * f;
+              break;
+            }
+          }
+        }
+      }
       p.animT += dt * (p.moving ? 8 : 2.4);
     }
     this.mpUpdateReviveCheck();
@@ -741,10 +807,126 @@ const Game = {
         _reviveSent: false,
       };
     }
+    // Feed the interpolation buffer read by mpUpdateNetworking().
+    const now = performance.now();
+    if (!p.netBuf) p.netBuf = [];
+    p.netBuf.push({ t: now, x: data.x, y: data.y });
+    while (p.netBuf.length > 12) p.netBuf.shift();
+    p.netStamp = now;
     p.targetX = data.x;
     p.targetY = data.y;
     p.facing = data.facing;
     p.moving = data.moving;
+  },
+  /* ---- Making a non-host's TOOLS actually do something --------------
+     Tools write CC/pull timers straight onto whatever Bayats are in the
+     list (`n.hookedT = Math.max(...)` etc, ~40 sites across tools.js).
+     On a joiner those Bayats are puppets, and updatePuppet() only decays
+     the timers — it never applies the MOVEMENT they drive, because a
+     puppet's position belongs to the host. Net effect: roughly two
+     thirds of the tools in the game (every pull, freeze, slow, stun and
+     anchor) silently did nothing for anyone who wasn't hosting. That,
+     far more than ping, is what made co-op feel broken.
+
+     Rather than rewrite every tools.js call site, this diffs the CC
+     fields around tools.update() and relays whatever increased to the
+     host, which applies it to its authoritative sim; the resulting
+     movement comes back through the normal snapshot. One choke point,
+     and it automatically covers tools added later. */
+  // Reused across frames on purpose: this runs every frame of every
+  // co-op run, and allocating a Map plus an object per Bayat each time
+  // would produce thousands of short-lived objects per second. GC
+  // hitches are exactly the kind of stutter this whole pass is trying to
+  // remove, so the buffer is filled in place instead.
+  _mpCCBuf: new Map(),
+  mpCaptureBayatCC() {
+    const m = this._mpCCBuf;
+    m.clear();
+    for (const n of this.bayats.list) {
+      m.set(n.id, [n.hookedT, n.frozenT, n.slowT, n.stunT, n.anchorT]);
+    }
+    return m;
+  },
+  mpSendBayatEffects(before) {
+    let effects = null;
+    for (const n of this.bayats.list) {
+      const prev = before.get(n.id);
+      if (!prev) continue;
+      // Compare against the reused array in place — no per-Bayat object.
+      // [hookedT, frozenT, slowT, stunT, anchorT]
+      const grew =
+        n.hookedT > prev[0] + 0.001 ||
+        n.frozenT > prev[1] + 0.001 ||
+        n.slowT > prev[2] + 0.001 ||
+        n.stunT > prev[3] + 0.001 ||
+        n.anchorT > prev[4] + 0.001;
+      if (!grew) continue; // the common case: allocate nothing
+      const e = { id: n.id };
+      let any = false;
+      // Only report INCREASES — a timer ticking down is not a new effect.
+      if (n.hookedT > prev[0] + 0.001) { e.h = +n.hookedT.toFixed(2); any = true; }
+      if (n.frozenT > prev[1] + 0.001) { e.f = +n.frozenT.toFixed(2); any = true; }
+      if (n.slowT > prev[2] + 0.001) { e.s = +n.slowT.toFixed(2); any = true; }
+      if (n.stunT > prev[3] + 0.001) { e.st = +n.stunT.toFixed(2); any = true; }
+      if (n.anchorT > prev[4] + 0.001) {
+        e.a = +n.anchorT.toFixed(2);
+        e.ax = Math.round(n.anchorX);
+        e.ay = Math.round(n.anchorY);
+        any = true;
+      }
+      // Allocate the array only when something actually changed, so a
+      // quiet frame (the overwhelming majority) allocates nothing at all.
+      if (any) (effects || (effects = [])).push(e);
+    }
+    // Tools fire every few seconds, so this is near-silent in practice —
+    // no per-frame traffic, only an actual cast produces a message.
+    if (effects) Multiplayer.send("bayatEffect", { effects });
+  },
+  // Host side: apply a peer's tool effects to the real simulation.
+  mpOnBayatEffect(data, peerId) {
+    if (!this.coop || !Multiplayer.isHost || !data || !data.effects) return;
+    for (const e of data.effects) {
+      const n = this.bayats.list.find((b) => b.id === e.id);
+      if (!n || !n.alive) continue;
+      if (e.h != null) {
+        n.hookedT = Math.max(n.hookedT, e.h);
+        // Remember WHO pulled, so the pull goes toward them and not the
+        // host — resolved live each frame (see Bayat.update) so it
+        // tracks them as they move rather than yanking to a stale point.
+        n.pullPeerId = peerId;
+      }
+      if (e.f != null) n.frozenT = Math.max(n.frozenT, e.f);
+      if (e.s != null) n.slowT = Math.max(n.slowT, e.s);
+      if (e.st != null) n.stunT = Math.max(n.stunT, e.st);
+      if (e.a != null) {
+        n.anchorT = Math.max(n.anchorT, e.a);
+        n.anchorX = e.ax;
+        n.anchorY = e.ay;
+      }
+    }
+  },
+  /* How far in the past to render remote things, adapted to the
+     connection instead of hardcoded.
+
+     A fixed buffer is a guess: too small and late packets leave it empty
+     (the buffer "runs dry" and motion stutters — which is exactly what
+     high jitter causes), too large and everything is needlessly stale.
+     Measured on a real Cloudflare relay: ping 151ms but jitter 65ms with
+     spikes to 315ms. Against that, the original fixed 100ms was under
+     water on every spike.
+
+     So: cover one snapshot interval (the unavoidable gap between
+     updates) plus a couple of standard deviations of jitter, clamped so
+     a pathological reading can't make the game feel like a slideshow.
+     Recomputed continuously, so it tightens automatically on a good
+     connection. */
+  mpInterpDelay() {
+    const c = CONFIG.coop;
+    const st = (typeof Multiplayer !== "undefined" && Multiplayer.netStats) || {};
+    if (!c.adaptiveInterp) return c.interpDelayMs;
+    const snapInterval = 1000 / c.bayatSnapshotHz;
+    const want = snapInterval + (st.jitterMs || 0) * 2;
+    return clamp(want, c.interpDelayMinMs, c.interpDelayMaxMs);
   },
   mpOnBayatSnapshot(data) {
     if (!this.coop || Multiplayer.isHost) return;
@@ -770,17 +952,35 @@ const Game = {
   },
   mpOnHugResult(data) {
     if (!this.coop) return;
-    if (data.winnerId === Multiplayer.selfId) {
-      delete this.mpPendingClaims[data.bayatId];
+    const iWon = data.winnerId === Multiplayer.selfId;
+    // A claim we predicted (see mpRequestHug) stashed the Bayat object
+    // here, because prediction already spliced it out of bayats.list —
+    // so looking it up in the list would find nothing.
+    const predicted = this.mpPendingClaims[data.bayatId];
+    if (iWon) delete this.mpPendingClaims[data.bayatId];
+
+    if (!data.valid) {
+      // Claim rejected — someone else got there first. We may have
+      // predicted it away; the next bayatSnapshot re-creates it from the
+      // host's list, so there's nothing to undo here.
+      return;
     }
-    if (!data.valid) return;
-    const bayat = this.bayats.list.find((n) => n.id === data.bayatId);
-    if (!bayat) return; // already pruned locally (e.g. by a later snapshot) — nothing left to show
-    const idx = this.bayats.list.indexOf(bayat);
-    if (idx >= 0) this.bayats.list.splice(idx, 1);
-    if (data.winnerId === Multiplayer.selfId) {
-      this.applyHugReward(bayat, false);
-    } else {
+
+    const inList = this.bayats.list.find((n) => n.id === data.bayatId);
+    if (inList) {
+      const idx = this.bayats.list.indexOf(inList);
+      if (idx >= 0) this.bayats.list.splice(idx, 1);
+    }
+    // Prefer the object we predicted with (it has the right type/pos);
+    // otherwise use whatever is still in the list.
+    const bayat = typeof predicted === "object" ? predicted : inList;
+    if (!bayat) return;
+
+    if (iWon) {
+      // Reward only — the visual pop already played at prediction time,
+      // so don't double it.
+      this.applyHugReward(bayat, false, typeof predicted === "object");
+    } else if (inList) {
       this.mpPlayDeathFx(bayat); // someone else's win — cosmetic pop only, no reward
     }
   },
@@ -823,8 +1023,36 @@ const Game = {
       this.applyHugReward(bayat, isChainHug);
     } else {
       if (this.mpPendingClaims[bayat.id]) return; // already asked, awaiting hugResult
-      this.mpPendingClaims[bayat.id] = true;
+      // Stash the Bayat itself, not just a flag: prediction below removes
+      // it from bayats.list, so mpOnHugResult couldn't otherwise find it
+      // to award the reward against.
+      this.mpPendingClaims[bayat.id] = bayat;
       Multiplayer.send("hugClaim", { bayatId: bayat.id });
+      /* ---- CLIENT-SIDE PREDICTION ----------------------------------
+         Without this, a non-host's hug does nothing for a full round
+         trip (measured ~230ms median on a Cloudflare relay, worse on a
+         spike). You'd touch a Bayat, see nothing happen, and watch it
+         drift away — the reported "the ping is so bad I couldn't hug a
+         single Bayat".
+
+         So we predict the likely outcome immediately: hide the Bayat and
+         play its death fx right now. What we deliberately DON'T predict
+         is the reward (EXP/time/combo) — that still waits for the host's
+         authoritative hugResult. Predicting rewards would mean rolling
+         them back on a rejected claim, and a rolled-back level-up is a
+         genuinely nasty thing to get right; the reward landing ~200ms
+         later is imperceptible, whereas the Bayat not vanishing is not.
+
+         If the claim IS rejected (someone else got it first — rare), the
+         next bayatSnapshot simply re-creates it, because the host still
+         has it in its list. The mis-prediction self-heals within ~80ms
+         with no rollback code at all. */
+      bayat.alive = false;
+      const idx = this.bayats.list.indexOf(bayat);
+      if (idx >= 0) this.bayats.list.splice(idx, 1);
+      this.mpPlayDeathFx(bayat);
+      this.player.triggerHug(bayat.x, bayat.y); // the lunge/squash feedback
+      AudioSystem.hug(this.combo);
     }
   },
   // Timer hit 0 in co-op: go down instead of ending the run, as long as
@@ -1320,11 +1548,16 @@ const Game = {
   // co-op). Never call this directly for a hug that hasn't been through
   // onHug() — that's what keeps co-op's claim arbitration from being
   // bypassable.
-  applyHugReward(bayat, isChainHug) {
+  // `visualsAlreadyPlayed` is set when a co-op client predicted this hug
+  // (see mpRequestHug): the death fx, lunge and sound already fired at
+  // touch time, so replaying them ~200ms later would double up.
+  applyHugReward(bayat, isChainHug, visualsAlreadyPlayed) {
     const type = bayat.type;
     bayat.alive = false;
-    this.player.triggerHug(bayat.x, bayat.y);
-    AudioSystem.hug(this.combo);
+    if (!visualsAlreadyPlayed) {
+      this.player.triggerHug(bayat.x, bayat.y);
+      AudioSystem.hug(this.combo);
+    }
     if (type.glow) AudioSystem.golden();
     if (type.danger) AudioSystem.danger();
 
@@ -1412,8 +1645,9 @@ const Game = {
     });
 
     // pixel death-pop: a short, stepped (non-smooth) scale+fade of the actual
-    // sprite, tinted to the type's color — this is the "sprite dies" animation
-    this.deathFx.push({
+    // sprite, tinted to the type's color — this is the "sprite dies" animation.
+    // Skipped when a co-op prediction already played it at touch time.
+    if (!visualsAlreadyPlayed) this.deathFx.push({
       x: bayat.x,
       y: bayat.y,
       radius: bayat.radius,
@@ -2699,7 +2933,16 @@ const Game = {
     }
     if (this.bayats.list.length >= 60) this.checkAchievement("manybayats");
     if (this.coop) this.mpUpdateNetworking(dt);
-    if (this.mode === "full") this.tools.update(dt, this.player, this.bayats);
+    if (this.mode === "full") {
+      // On a joiner, capture CC state around the tool tick so any effect
+      // a tool just applied can be relayed to the host — see
+      // mpSendBayatEffects() for why this is done by diffing rather than
+      // at each of tools.js's ~40 write sites.
+      const ccBefore =
+        this.coop && !Multiplayer.isHost ? this.mpCaptureBayatCC() : null;
+      this.tools.update(dt, this.player, this.bayats);
+      if (ccBefore) this.mpSendBayatEffects(ccBefore);
+    }
     this.chests.update(
       dt,
       this.elapsed,
@@ -2770,6 +3013,7 @@ const Game = {
       mode: this.mode,
     });
     UI.updateActiveEventBanner(this.hyperModeActive, this.activeEvent);
+    if (UI.netStatsVisible) UI.renderNetStats();
     if (this.mode === "full") UI.renderTools(this.tools);
   },
 

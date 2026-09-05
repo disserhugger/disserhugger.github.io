@@ -26,6 +26,7 @@ const UI = {
       "mp-room-code",
       "mp-peer-list",
       "mp-conn-status",
+      "net-stats",
       "mp-start-btn",
       "hud",
       "hud-timer",
@@ -388,6 +389,32 @@ const UI = {
   },
   // Live connection readout in the lobby. Only rendered when
   // CONFIG.coop.debug is on — see that setting's comment in config.js.
+  /* In-run netcode HUD (press N). Exists so "co-op feels bad" can be
+     diagnosed instead of guessed at — average ping alone is a poor
+     predictor of feel, JITTER is usually the real culprit, and a snapshot
+     interval drifting above its target points at the host being frame-
+     starved rather than at the network. */
+  netStatsVisible: false,
+  renderNetStats() {
+    const el = this.els["net-stats"];
+    if (!el) return;
+    if (!this.netStatsVisible || !Game.coop || typeof Multiplayer === "undefined") {
+      el.classList.add("hidden");
+      return;
+    }
+    el.classList.remove("hidden");
+    const s = Multiplayer.netStats || {};
+    const expectedSnap = Math.round(1000 / CONFIG.coop.bayatSnapshotHz);
+    const rate = (v, good, ok) => (v <= good ? "ns-good" : v <= ok ? "ns-ok" : "ns-bad");
+    el.innerHTML =
+      `<div class="ns-row"><span>ping</span><b class="${rate(s.rttMs, 80, 160)}">${s.rttMs || "–"} ms</b></div>` +
+      `<div class="ns-row"><span>jitter</span><b class="${rate(s.jitterMs, 15, 40)}">${s.jitterMs || 0} ms</b></div>` +
+      `<div class="ns-row"><span>min/max</span><b>${s.rttMin || 0}/${s.rttMax || 0}</b></div>` +
+      `<div class="ns-row"><span>snap gap</span><b class="${rate(Math.abs((s.lastSnapshotAgeMs || 0) - expectedSnap), 20, 50)}">${s.lastSnapshotAgeMs || 0} ms</b><small>~${expectedSnap}</small></div>` +
+      `<div class="ns-row"><span>msgs/s</span><b>${s.msgsPerSec || 0}</b></div>` +
+      `<div class="ns-row"><span>role</span><b>${Multiplayer.isHost ? "HOST" : "peer"}</b></div>` +
+      `<div class="ns-row"><span>interp</span><b>${Math.round(Game.mpInterpDelay())} ms</b><small>${CONFIG.coop.adaptiveInterp ? "auto" : "fixed"}</small></div>`;
+  },
   renderMpConnStatus() {
     const el = this.els["mp-conn-status"];
     if (!el) return;

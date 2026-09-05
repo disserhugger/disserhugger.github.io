@@ -217,8 +217,62 @@ const CONFIG = {
     // without re-testing joins repeatedly. See CLAUDE.md bug history.
     relayRedundancy: 20,
 
-    playerStateHz: 12, // how often you broadcast your own position
-    bayatSnapshotHz: 8, // how often the host broadcasts Bayat positions
+    /* Tick rates. Higher = less staleness = tighter feel, at the cost of
+       more messages. These were raised (12->20, 8->15) only AFTER
+       snapshot culling below cut the payload ~68%, so the faster rates
+       still cost LESS total bandwidth than the old slow ones did.
+       Cloudflare bills inbound WebSocket messages at 20:1, so even at
+       these rates a 2-player run is only ~2.8 billed requests/sec. */
+    playerStateHz: 20, // how often you broadcast your own position
+    bayatSnapshotHz: 15, // how often the host broadcasts Bayat positions
+
+    /* Snapshot culling: only Bayats near SOME player are sent. The real
+       radius is computed per-frame as (half the screen diagonal +
+       margin), so it adapts to the player's actual window instead of
+       assuming a size — a fixed radius either saves nothing on a small
+       screen or clips visible Bayats on an ultrawide.
+
+       The margin is the off-screen buffer. It has to exceed roughly
+       (Bayat speed x snapshot interval) so something entering the radius
+       has finished its spawn-in animation well before it's on screen;
+       300px is ~2.5s of travel at base Bayat speed. */
+    snapshotCullMargin: 300,
+    snapshotCullMin: 900, // floor, so a tiny window still gets useful lookahead
+
+    /* Remote things (Bayats and other players) are rendered this many ms
+       IN THE PAST, interpolating between two snapshots that actually
+       arrived — rather than extrapolating a guess forward.
+
+       This is the standard approach for a reason: Bayats steer randomly
+       every frame, so projecting a straight line ahead of one overshoots
+       and snaps back on every turn (that's rubber-banding). Rendering
+       slightly late is always smooth and never wrong.
+
+       Must exceed one snapshot interval (1000/bayatSnapshotHz = ~67ms)
+       with headroom for jitter, or the buffer runs dry and motion
+       stutters. Too high just adds needless visual delay. ~100ms is the
+       usual sweet spot; it costs nothing mechanically because hug
+       arbitration only asks the host whether a Bayat is still ALIVE,
+       never how close you were standing. */
+    interpDelayMs: 100, // used only when adaptiveInterp is false
+
+    /* Adaptive interpolation delay (recommended). Instead of trusting a
+       fixed number, Game.mpInterpDelay() sizes the buffer from the
+       connection's MEASURED jitter: one snapshot interval + 2x jitter.
+
+       This matters more than average ping. A real measurement on this
+       game's relay read 151ms ping but 65ms jitter with spikes to 315ms
+       — against that, a fixed 100ms buffer empties on every spike and
+       stutters, while a connection with 5ms jitter gets a needlessly
+       stale 100ms for no reason. Press N in a co-op run to see both
+       numbers live. */
+    adaptiveInterp: true,
+    interpDelayMinMs: 80,
+    interpDelayMaxMs: 260,
+
+    // How often the netcode HUD measures round-trip time (press N in a
+    // co-op run to show it). One tiny message per interval.
+    pingIntervalMs: 2000,
     reviveRadius: 46,
     reviveTimeFraction: 0.4, // revived teammates come back with this much of max time
 

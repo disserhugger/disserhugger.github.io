@@ -1327,3 +1327,40 @@ body.compact-hud #menu-fab {
     padding: 8px 12px;
   }
 }
+
+/* ---------- Netcode diagnostics (press N in a co-op run) ----------
+   Deliberately plain and out of the way: this is a debugging tool, not
+   part of the game's look. Colour-coded so a glance is enough — the
+   numbers that matter are jitter (stutter) and snap gap (host frame
+   starvation), not average ping. */
+#net-stats {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 14;
+  pointer-events: none;
+  font-family: var(--font-pixel);
+  font-size: 10px;
+  line-height: 1.5;
+  background: rgba(10, 6, 16, 0.86);
+  border: 2px solid var(--overlay);
+  padding: 7px 10px;
+  min-width: 150px;
+  color: var(--subtext);
+}
+#net-stats .ns-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+#net-stats b {
+  color: var(--text);
+  font-weight: 700;
+}
+#net-stats small {
+  opacity: 0.5;
+  margin-left: 4px;
+}
+#net-stats .ns-good { color: var(--good); }
+#net-stats .ns-ok { color: var(--amber-bright); }
+#net-stats .ns-bad { color: var(--danger); }

@@ -423,7 +423,20 @@ class Bayat {
     if (this.slowT > 0) this.slowT -= dt;
     if (this.hookedT > 0) {
       this.hookedT -= dt;
-      const a = Math.atan2(player.y - this.y, player.x - this.x);
+      /* Pull toward whoever actually cast it. A remote peer's pull tools
+         are relayed to the host (Game.mpOnBayatEffect) and tagged with
+         their peer id; resolving that id LIVE each frame — rather than
+         baking in the position at cast time — means the Bayat tracks
+         them as they move, instead of being yanked to where they stood
+         a moment ago. Falls back to `player` (the normal target) for
+         solo play and for the host's own casts. */
+      let puller = player;
+      if (this.pullPeerId && Game.mpPeers) {
+        const p = Game.mpPeers[this.pullPeerId];
+        if (p) puller = p;
+      }
+      if (this.hookedT <= 0) this.pullPeerId = null;
+      const a = Math.atan2(puller.y - this.y, puller.x - this.x);
       const pull = 620;
       this.vx = Math.cos(a) * pull;
       this.vy = Math.sin(a) * pull;
@@ -587,9 +600,55 @@ class Bayat {
     if (this.anchorT > 0) this.anchorT -= dt;
     if (this.throwFlashT > 0) this.throwFlashT -= dt;
     if (this.netTargetX == null) return; // no snapshot yet — stay put
-    const t = Math.min(1, dt * 10);
-    this.x = lerp(this.x, this.netTargetX, t);
-    this.y = lerp(this.y, this.netTargetY, t);
+    /* SNAPSHOT INTERPOLATION (not extrapolation — this was changed after
+       testing, see CLAUDE.md bug history).
+
+       Bayats steer erratically on purpose: `wanderAngle += rand(-0.7,0.7)
+       * turnRate` every frame, plus per-type jitter. Projecting a
+       straight line forward from an entity that is about to turn is
+       actively wrong — it overshoots, then snaps back when the truth
+       arrives, which reads as rubber-banding. That's the classic reason
+       shooters interpolate rather than extrapolate.
+
+       So instead of guessing the future, we render slightly in the PAST:
+       hold a short buffer of received samples and draw the position
+       between the two that bracket (now - interpDelay). Every frame is
+       then between two positions the host actually reported — never a
+       guess, so it can never overshoot or snap.
+
+       The cost is a small fixed visual delay, which is invisible here:
+       hug arbitration checks only whether the host still has the Bayat
+       ALIVE, never how close you were, so being a frame "behind" costs
+       you nothing mechanically. */
+    const buf = this.netBuf;
+    if (!buf || buf.length === 0) return;
+    const renderAt = performance.now() - Game.mpInterpDelay();
+
+    // Newer than the whole buffer (packets stalled): hold at the newest
+    // known position rather than inventing motion.
+    const newest = buf[buf.length - 1];
+    if (renderAt >= newest.t) {
+      this.x = newest.x;
+      this.y = newest.y;
+      return;
+    }
+    // Older than the buffer (just spawned / big gap): snap to oldest.
+    if (renderAt <= buf[0].t) {
+      this.x = buf[0].x;
+      this.y = buf[0].y;
+      return;
+    }
+    for (let i = buf.length - 1; i > 0; i--) {
+      const b = buf[i],
+        a = buf[i - 1];
+      if (renderAt >= a.t && renderAt <= b.t) {
+        const span = b.t - a.t;
+        const f = span > 0 ? (renderAt - a.t) / span : 1;
+        this.x = a.x + (b.x - a.x) * f;
+        this.y = a.y + (b.y - a.y) * f;
+        return;
+      }
+    }
   }
   updateBombState(dt, player, d) {
     const cfg = CONFIG.bomb;
@@ -947,7 +1006,28 @@ class BayatManager {
         this.list.splice(i, 1);
         continue;
       }
-      n.update(dt, player, this.list, blackHoleLevel);
+      /* AI targets the NEAREST player, not unconditionally the host.
+         Previously every Bayat chased/fled the host's own player, so on
+         a joiner's screen Bayats simply ignored them — they'd sit
+         motionless while you walked up, or flee toward you because they
+         were running from someone across the map. That reads as broken
+         far more than latency does.
+
+         `player` (the host's own) stays the fallback, so solo play takes
+         the identical path it always did. */
+      let target = player;
+      if (extraSpawnAnchors && extraSpawnAnchors.length) {
+        let best = dist2(n.x, n.y, player.x, player.y);
+        for (const a of extraSpawnAnchors) {
+          if (!a || a.downed) continue; // a downed teammate isn't a threat to flee
+          const d = dist2(n.x, n.y, a.x, a.y);
+          if (d < best) {
+            best = d;
+            target = a;
+          }
+        }
+      }
+      n.update(dt, target, this.list, blackHoleLevel);
     }
   }
   // Co-op, non-host clients: called instead of update() above — no
@@ -963,6 +1043,7 @@ class BayatManager {
   // death fx locally, this is just cleanup for ids we somehow missed,
   // e.g. this client joined mid-run and never saw the original spawn).
   applySnapshot(list, difficulty) {
+    const now = performance.now();
     const seen = {};
     for (const s of list) {
       seen[s.id] = true;
@@ -974,6 +1055,13 @@ class BayatManager {
         n.id = s.id;
         this.list.push(n);
       }
+      /* Push into the interpolation buffer that updatePuppet() reads.
+         Kept small — only enough history to cover the render delay plus
+         a couple of dropped packets; anything older is dead weight. */
+      if (!n.netBuf) n.netBuf = [];
+      n.netBuf.push({ t: now, x: s.x, y: s.y });
+      while (n.netBuf.length > 12) n.netBuf.shift();
+      n.netStamp = now;
       n.netTargetX = s.x;
       n.netTargetY = s.y;
     }
