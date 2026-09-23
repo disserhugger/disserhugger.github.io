@@ -236,6 +236,14 @@ const CONFIG = {
        (Bayat speed x snapshot interval) so something entering the radius
        has finished its spawn-in animation well before it's on screen;
        300px is ~2.5s of travel at base Bayat speed. */
+    /* How often the host re-sends every visible Bayat's TYPE. Types are
+       normally sent once, when a Bayat is introduced, because a type never
+       changes and repeating it every tick was two thirds of the payload.
+       This periodic full re-introduction is the self-healing part: a
+       client that reloaded or joined late relearns the arena within this
+       window instead of staying blind to Bayats it never saw spawn.
+       Lower = recovers faster, costs a bigger packet that often. */
+    snapshotKeyframeMs: 3000,
     snapshotCullMargin: 300,
     snapshotCullMin: 900, // floor, so a tiny window still gets useful lookahead
 

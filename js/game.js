@@ -75,8 +75,8 @@ const Game = {
   mpInLobby: false,
   coop: false, // true for the whole duration of a networked run — orthogonal to `mode` (coop always uses "full" semantics)
   mpPeers: {}, // peerId -> {name, color, x, y, targetX, targetY, facing, moving, downed, animT, _reviveSent}
-  mpNetTimer: 0, // accumulator: local playerState broadcast tick
-  mpBayatNetTimer: 0, // accumulator: host-only Bayat snapshot broadcast tick
+  mpNextPlayerSend: 0, // wall-clock deadline: local playerState broadcast
+  mpNextBayatSend: 0, // wall-clock deadline: host-only Bayat snapshot
   mpPendingClaims: {}, // bayatId -> true while awaiting the host's hugResult (non-host only)
   joystick: {
     active: false,
@@ -531,7 +531,9 @@ const Game = {
     Multiplayer.on("playerState", (data, peerId) =>
       this.mpOnPlayerState(data, peerId),
     );
-    Multiplayer.on("bayatSnapshot", (data) => this.mpOnBayatSnapshot(data));
+    Multiplayer.on("bayatSnapshot", (data, peerId) =>
+      this.mpOnBayatSnapshot(data, peerId),
+    );
     Multiplayer.on("bayatEffect", (data, peerId) =>
       this.mpOnBayatEffect(data, peerId),
     );
@@ -661,8 +663,10 @@ const Game = {
     this.mpInLobby = false;
     this.coop = true;
     if (ARENAS.some((a) => a.id === arenaId)) this.selectedArenaId = arenaId;
-    this.mpNetTimer = 0;
-    this.mpBayatNetTimer = 0;
+    // Wall-clock send deadlines (see mpUpdateNetworking). 0 = send on the
+    // very first frame of the run.
+    this.mpNextPlayerSend = 0;
+    this.mpNextBayatSend = 0;
     this.mpPendingClaims = {};
     // Seed puppets for everyone already in the room from their known
     // profile; position/facing/moving fill in on their first playerState
@@ -670,6 +674,7 @@ const Game = {
     // is also exactly where a fresh Player spawns, so this isn't a guess,
     // it's the real shared spawn point.
     this.mpPeers = {};
+    this.mpClockOffsets = {};
     for (const id in Multiplayer.peers) {
       const prof = Multiplayer.peers[id];
       this.mpPeers[id] = {
@@ -693,10 +698,31 @@ const Game = {
   // deliberately low (10-15/sec-ish) — see CLAUDE.md "Multiplayer"
   // protocol table for why that's plenty for a casual co-op game. ----
   mpUpdateNetworking(dt) {
-    this.mpNetTimer -= dt;
-    if (this.mpNetTimer <= 0) {
-      this.mpNetTimer = 1 / CONFIG.coop.playerStateHz;
+    /* Network cadence runs on the WALL CLOCK, never on dt.
+       loop() clamps dt to 0.05s so one long frame can't blow up the
+       physics — correct for the sim, but it used to drive these timers
+       too, and that made the send rate collapse faster than the frame
+       rate did. Measured: a host at 20fps sent 10 snapshots/sec, at 10fps
+       sent 5, and a backgrounded host (RAF throttled to ~1fps) sent one
+       every TWO seconds. The joiner then has nothing to interpolate
+       between and everything moves in visible steps.
+
+       Deadlines also fix a quieter bug: resetting a countdown to an
+       absolute 1/Hz discards the leftover time past zero, so a 60fps host
+       actually sent 12/sec rather than the configured 15. Advancing the
+       deadline by exactly one interval keeps the average rate honest.
+       Math.max(now, ...) stops a long stall from firing a catch-up burst
+       all in one frame. */
+    const netNow = performance.now();
+    if (netNow >= this.mpNextPlayerSend) {
+      const iv = 1000 / CONFIG.coop.playerStateHz;
+      this.mpNextPlayerSend = Math.max(netNow, this.mpNextPlayerSend + iv);
       Multiplayer.send("playerState", {
+        // st = OUR clock when this position was true. See mpSampleTime():
+        // without it the receiver has to stamp samples on arrival, which
+        // bakes network jitter straight into the interpolation and makes
+        // motion surge and stall.
+        st: Math.round(performance.now()),
         x: Math.round(this.player.x),
         y: Math.round(this.player.y),
         facing: this.player.facing,
@@ -704,9 +730,9 @@ const Game = {
       });
     }
     if (Multiplayer.isHost) {
-      this.mpBayatNetTimer -= dt;
-      if (this.mpBayatNetTimer <= 0) {
-        this.mpBayatNetTimer = 1 / CONFIG.coop.bayatSnapshotHz;
+      if (netNow >= this.mpNextBayatSend) {
+        const iv = 1000 / CONFIG.coop.bayatSnapshotHz;
+        this.mpNextBayatSend = Math.max(netNow, this.mpNextBayatSend + iv);
         /* Only send Bayats some player could plausibly see. Measured on a
            full arena: 100 Bayats = ~4KB per snapshot = ~118 MB/hour, and
            ~68% of that was Bayats nobody was anywhere near. Culling pays
@@ -731,7 +757,30 @@ const Game = {
           CONFIG.coop.snapshotCullMin,
         );
         const cull2 = cull * cull;
-        const list = [];
+        /* COMPACT WIRE FORMAT. The old one sent
+             {"id":123,"t":"normal","x":1234,"y":2345}
+           for every Bayat every tick — 41 bytes each, ~1.4KB a snapshot.
+           Two thirds of that was pure repetition: JSON keys that never
+           change, and a type string re-sent 12 times a second for a value
+           that is fixed for the Bayat's whole life.
+
+           Now positions ride in one flat number array, [id,x,y,id,x,y,...],
+           and a type is sent only when a Bayat is INTRODUCED (`n`, as
+           [id,typeKey,...]). Everything else is already known.
+
+           Introductions are re-sent in full every snapshotKeyframeMs so
+           the stream is self-healing: a client that reloaded, or joined
+           the room late, recovers on its own instead of being permanently
+           blind to Bayats it never saw spawn. Clearing the set on each
+           keyframe also stops it growing for the whole run. */
+        if (!this._mpTypesSent) this._mpTypesSent = new Set();
+        const keyframe = netNow >= (this._mpNextKeyframe || 0);
+        if (keyframe) {
+          this._mpTypesSent.clear();
+          this._mpNextKeyframe = netNow + CONFIG.coop.snapshotKeyframeMs;
+        }
+        const l = [];
+        const intro = [];
         for (const n of this.bayats.list) {
           if (!n.alive) continue;
           let visible = false;
@@ -739,17 +788,19 @@ const Game = {
             if (a && dist2(n.x, n.y, a.x, a.y) <= cull2) { visible = true; break; }
           }
           if (!visible) continue;
-          list.push({
-            id: n.id,
-            t: n.type.key,
-            x: Math.round(n.x),
-            y: Math.round(n.y),
-          });
+          l.push(n.id, Math.round(n.x), Math.round(n.y));
+          if (!this._mpTypesSent.has(n.id)) {
+            this._mpTypesSent.add(n.id);
+            intro.push(n.id, n.type.key);
+          }
         }
-        Multiplayer.send("bayatSnapshot", {
-          list,
-          difficulty: this.bayats.difficulty(this.elapsed),
-        });
+        const payload = {
+          st: Math.round(performance.now()), // see playerState above
+          l,
+          d: this.bayats.difficulty(this.elapsed),
+        };
+        if (intro.length) payload.n = intro;
+        Multiplayer.send("bayatSnapshot", payload);
       }
     }
     for (const id in this.mpPeers) {
@@ -807,8 +858,10 @@ const Game = {
         _reviveSent: false,
       };
     }
-    // Feed the interpolation buffer read by mpUpdateNetworking().
-    const now = performance.now();
+    // Feed the interpolation buffer read by mpUpdateNetworking(), stamped
+    // on the SENDER's clock — same reason as bayatSnapshot, see
+    // mpSampleTime(). Each peer has its own clock, hence the per-peer key.
+    const now = this.mpSampleTime(peerId, data && data.st);
     if (!p.netBuf) p.netBuf = [];
     p.netBuf.push({ t: now, x: data.x, y: data.y });
     while (p.netBuf.length > 12) p.netBuf.shift();
@@ -928,9 +981,86 @@ const Game = {
     const want = snapInterval + (st.jitterMs || 0) * 2;
     return clamp(want, c.interpDelayMinMs, c.interpDelayMaxMs);
   },
-  mpOnBayatSnapshot(data) {
+  /* ---- Sender-clock mapping: why remote motion was still "clunky" ----
+     A snapshot stream is EVEN at the source — the host emits one every
+     1000/bayatSnapshotHz ms exactly. It does not arrive evenly. With the
+     ~38ms jitter measured on this connection, consecutive snapshots land
+     40ms apart, then 95ms, then 55ms.
+
+     Stamping each sample with its ARRIVAL time (what this used to do)
+     tells the interpolator that a Bayat covered its normal 67ms of travel
+     in 40ms — so it renders it moving 1.7x too fast — and then that the
+     next step took 95ms, so it crawls. The position is never wrong, but
+     the SPEED visibly surges and stalls every single step. That is the
+     unsmooth walk, and it is a completely separate defect from the buffer
+     running dry, which is what the adaptive delay fixed. Deepening the
+     buffer cannot help: the samples inside it are unevenly spaced.
+
+     The fix is to stamp samples with the SENDER's clock, so spacing
+     reflects when positions were actually true. The two clocks share no
+     epoch, so we estimate the offset between them.
+
+     Estimator: offset = local_arrival - sender_stamp, taking the MINIMUM
+     over a sliding window. The least-delayed packet carried the least
+     jitter, so its offset is the best estimate of the true difference
+     between the clocks; everything above that minimum IS the jitter we
+     are removing.
+
+     The window (rather than an all-time minimum) is what lets it follow
+     a genuinely slower route, and what stops one freakishly fast packet
+     from latching the estimate too low forever. It matters that this is
+     a windowed min and not a decaying one: an estimate that creeps back
+     up toward the current sample converges on the ARRIVAL time, which is
+     precisely the behaviour this exists to eliminate — measured, a 2%
+     creep gave back most of the smoothing. */
+  mpClockWindowMs: 5000,
+  mpSampleTime(peerId, st) {
+    const now = performance.now();
+    // No sender stamp (nothing else speaks this protocol yet, but be
+    // safe): fall back to the old arrival-time behaviour.
+    if (typeof st !== "number" || !isFinite(st) || !peerId) return now;
+    if (!this.mpClockOffsets) this.mpClockOffsets = {};
+    const o = this.mpClockOffsets;
+    let e = o[peerId];
+    if (!e) e = o[peerId] = { samples: [] };
+    const observed = now - st;
+    e.samples.push({ at: now, v: observed });
+    const cutoff = now - this.mpClockWindowMs;
+    while (e.samples.length > 1 && e.samples[0].at < cutoff) e.samples.shift();
+    let off = e.samples[0].v;
+    for (let i = 1; i < e.samples.length; i++)
+      if (e.samples[i].v < off) off = e.samples[i].v;
+    const mapped = st + off;
+    /* Sanity net: a clock jump (tab sleep, host restart) could map a
+       sample far from the present, which would strand the buffer. Re-seed
+       rather than feed the interpolator a bogus timestamp. */
+    if (Math.abs(mapped - now) > 2000) {
+      e.samples.length = 0;
+      e.samples.push({ at: now, v: observed });
+      return now;
+    }
+    return mapped;
+  },
+  mpOnBayatSnapshot(data, peerId) {
     if (!this.coop || Multiplayer.isHost) return;
-    this.bayats.applySnapshot(data.list, data.difficulty);
+    if (!data) return;
+    const t = this.mpSampleTime(peerId, data.st);
+    if (data.l) {
+      this.bayats.applySnapshot(data.l, data.n, data.d, t);
+      return;
+    }
+    /* Legacy shape ({list:[{id,t,x,y}]}) — only reachable if a peer is
+       running an older build off a stale cache. Convert rather than
+       ignore, so a mismatched pair still plays instead of one of them
+       seeing an empty arena. */
+    if (!Array.isArray(data.list)) return;
+    const l = [];
+    const intro = [];
+    for (const b of data.list) {
+      l.push(b.id, b.x, b.y);
+      intro.push(b.id, b.t);
+    }
+    this.bayats.applySnapshot(l, intro, data.difficulty, t);
   },
   // Host-only: the arbiter for "who gets this Bayat." Whoever's claim
   // arrives first while it's still alive wins; everyone else's claim for
@@ -1260,6 +1390,7 @@ const Game = {
     this.coop = false;
     this.mpInLobby = false;
     this.mpPeers = {};
+    this.mpClockOffsets = {};
     this.mpPendingClaims = {};
   },
 

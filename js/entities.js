@@ -1042,14 +1042,49 @@ class BayatManager {
   // host no longer lists (it died — a hugResult already handled the
   // death fx locally, this is just cleanup for ids we somehow missed,
   // e.g. this client joined mid-run and never saw the original spawn).
-  applySnapshot(list, difficulty) {
-    const now = performance.now();
-    const seen = {};
-    for (const s of list) {
-      seen[s.id] = true;
+  applySnapshot(flat, intro, difficulty, sampleT) {
+    /* sampleT is the host's send time mapped onto our clock
+       (Game.mpSampleTime). Buffering by that instead of by arrival time
+       is what makes remote motion smooth: the host emits snapshots at a
+       perfectly even rate, so evenly-spaced stamps mean the interpolator
+       plays the motion back at its true speed. Arrival times are jittered
+       by the network, and interpolating between them makes every Bayat
+       surge and stall. Falls back to arrival time if a sender stamp
+       wasn't supplied. */
+    const now = typeof sampleT === "number" ? sampleT : performance.now();
+    if (!Array.isArray(flat)) return;
+    /* Wire format (see Game.mpUpdateNetworking): `flat` is a flat number
+       array [id,x,y, id,x,y, ...] and `intro` is [id,typeKey, ...] naming
+       only the Bayats being introduced this tick. A type is fixed for a
+       Bayat's whole life, so re-sending it every tick was pure waste.
+
+       Both scratch containers are reused across calls — this runs ~12x a
+       second for the whole run, and a Map plus a Set allocated per call
+       is exactly the kind of steady garbage that produces the GC hitches
+       this netcode work exists to remove. */
+    if (!this._introMap) this._introMap = new Map();
+    if (!this._seenIds) this._seenIds = new Set();
+    const introMap = this._introMap;
+    const seen = this._seenIds;
+    introMap.clear();
+    seen.clear();
+    if (Array.isArray(intro))
+      for (let i = 0; i + 1 < intro.length; i += 2)
+        introMap.set(intro[i], intro[i + 1]);
+
+    for (let i = 0; i + 2 < flat.length; i += 3) {
+      const s = { id: flat[i], x: flat[i + 1], y: flat[i + 2] };
+      seen.add(s.id);
       let n = this.list.find((b) => b.id === s.id);
       if (!n) {
-        const type = BAYAT_TYPES[s.t];
+        /* An id we've never seen and no introduction for it: the host is
+           mid-keyframe-interval and already introduced it to everyone who
+           was listening at the time. Skip it — the next keyframe re-sends
+           every type, so this self-heals within snapshotKeyframeMs rather
+           than inventing a wrong type or throwing. */
+        const key = introMap.get(s.id);
+        if (!key) continue;
+        const type = BAYAT_TYPES[key];
         if (!type) continue; // unknown type key — ignore rather than throw
         n = new Bayat(type, s.x, s.y, difficulty || 0);
         n.id = s.id;
@@ -1059,14 +1094,17 @@ class BayatManager {
          Kept small — only enough history to cover the render delay plus
          a couple of dropped packets; anything older is dead weight. */
       if (!n.netBuf) n.netBuf = [];
-      n.netBuf.push({ t: now, x: s.x, y: s.y });
+      // updatePuppet()'s bracket search requires ascending stamps. A clock
+      // re-seed can produce one that isn't; nudge rather than corrupt.
+      const last = n.netBuf[n.netBuf.length - 1];
+      n.netBuf.push({ t: last && now <= last.t ? last.t + 1 : now, x: s.x, y: s.y });
       while (n.netBuf.length > 12) n.netBuf.shift();
       n.netStamp = now;
       n.netTargetX = s.x;
       n.netTargetY = s.y;
     }
     for (let i = this.list.length - 1; i >= 0; i--) {
-      if (!seen[this.list[i].id]) this.list.splice(i, 1);
+      if (!seen.has(this.list[i].id)) this.list.splice(i, 1);
     }
   }
   nearest(x, y, filterFn) {

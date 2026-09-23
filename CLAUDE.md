@@ -60,30 +60,18 @@ js/tools.js                ToolSystem (every active tool's behavior), drawRopeLi
 js/chests.js               CHEST_KINDS + ChestSystem
 js/ui.js                   UI — all DOM manipulation, kept separate from Game on purpose
 js/game.js                 Game — the main singleton/state machine/update-draw loop
-server/relay-server.js    WebSocket relay — the RECOMMENDED co-op
-                          transport. Deployed by the user to Deno Deploy
-                          (free, no credit card). Stateless message
-                          forwarding only; the host client is still the
-                          Bayat/hug authority. Makes TURN unnecessary
-                          entirely because both players connect OUTBOUND.
-                          Optional — without it the game falls back to
-                          peer-to-peer. See server/README.md.
-server/README.md          relay deploy guide + transport-mode reference
-worker/turn-worker.js     TURN credential endpoint — only needed for the
-                          PEER-TO-PEER path. Superseded by the relay for
-                          most users; kept because P2P is harder to block
-                          at a national level. Supports both static
-                          credentials (any provider) and Cloudflare's
-                          short-lived minting API.
-                          Mints short-lived Cloudflare TURN credentials.
-                          Exists because Cloudflare refuses to issue
-                          long-lived ones and the minting key must never
-                          reach the browser. Entirely OPTIONAL — the game
-                          runs without it, just on plain P2P. Deploy
-                          instructions in worker/README.md.
-worker/wrangler.toml      deploy config for the above (secrets are NOT in
-                          here — set via `wrangler secret put`)
-worker/README.md          ~5-minute TURN setup walkthrough + a table for
+MULTIPLAYER.md            ★ FULL co-op setup guide — deploy steps,
+                          troubleshooting, protocol reference, known
+                          gaps. Point people here first.
+worker/relay-worker.js    The co-op WebSocket relay (Cloudflare Worker +
+                          Durable Object). THE recommended transport:
+                          both players connect OUTBOUND, so there's no
+                          NAT traversal, no TURN, and no credentials.
+                          One Durable Object per room code. Optional —
+                          without it the game falls back to P2P.
+worker/wrangler.toml      deploy config. NOTE: migrations must use
+                          `new_sqlite_classes` (free plan only supports
+                          SQLite-backed Durable Objects).
                           reading the lobby's connection diagnostics
 js/multiplayer.js          Multiplayer — the ONLY ES module in the project;
                           wraps Trystero (peer-to-peer WebRTC, no backend
@@ -610,7 +598,10 @@ them; Reverse World's `invertControls` event field does the identical
 flip, just gated on the active event instead of a timer), or force-
 triggering a random event.
 
-**Test hotkey**: press **J** anytime during a run to trigger a jumpscare
+**Test hotkeys**: press **N** during a co-op run for the netcode HUD
+(ping / jitter / snapshot gap / msgs-per-sec / adaptive interp delay) —
+jitter is usually the number that explains "it feels laggy", not ping.
+And press **J** anytime during a run to trigger a jumpscare
 immediately, bypassing the per-second random roll — **Shift+J** forces
 the rare Golden variant specifically (bound in `Game.bindInput()`,
 guarded on `this.state === "playing"` and not already mid-jumpscare).
@@ -731,7 +722,11 @@ hugging itself.
   "Random events" above) specifically so this gap doesn't also cause
   visible position-fighting on non-host clients in the meantime.
 
-## Multiplayer (co-op, peer-to-peer, no backend)
+## Multiplayer (co-op)
+
+> **Setting it up? Read `MULTIPLAYER.md`** — deploy steps,
+> troubleshooting, config reference and the message protocol all live
+> there. This section is the architectural background.
 
 An opt-in second mode alongside solo Arcade/Full Game — a shared main-menu
 button ("Co-op") leads to a profile screen, then host/join, then a lobby,
@@ -953,7 +948,7 @@ Both present an identical surface — `selfId`, `peers`,
 in `game.js` knows which one is running.** That was the whole point of
 the abstraction; adding the relay needed zero changes to game logic.
 
-**RELAY (recommended, `server/relay-server.js`)** — both players open an
+**RELAY (recommended, `worker/relay-worker.js`)** — both players open an
 OUTBOUND WebSocket to a server the user deploys (Deno Deploy: free, no
 credit card). Outbound connections always work, so there is no NAT
 traversal, no TURN, and no credentials at all. The relay is deliberately
@@ -995,62 +990,40 @@ Trystero's job.
 
 That is precisely why it "works on the same wifi" (no NAT traversal
 needed) and is "random" across networks (depends on both players' NAT
-types, which neither of you controls). **The only real fix is a TURN
-server**, which relays the traffic when direct P2P fails.
+types, which neither of you controls).
 
-**The setup here is Cloudflare TURN via a small Worker** (`worker/`,
-opt-in, off by default). Two things made that the choice:
+**This is why the relay transport exists and is the default.** A relay
+sidesteps the whole problem: both players connect OUTBOUND, which always
+works, so there is no NAT traversal, no TURN server, and no credentials.
 
-- **It survives restrictive networks.** Cloudflare offers TURN over TLS
-  on port 443, which is indistinguishable from ordinary HTTPS. A network
-  that blocks it blocks the web. This mattered more than raw
-  reliability, because the requirement was "works for someone in, say,
-  Iran" — see the note on centralized services below.
-- **It's free at this scale.** 1,000 GB/month, and TURN only carries
-  traffic when direct P2P fails.
+**A TURN-based approach was built first and then removed.** It worked in
+principle (Cloudflare TURN over TLS on 443, minted by a Worker holding a
+server-side key), but Cloudflare's TURN product requires a credit card,
+which blocked the user outright — as did two other providers, in two
+other ways. The relay achieves the same reliability with strictly less
+machinery and nothing secret to protect, so `turn-worker.js`,
+`CONFIG.coop.turnServers` and `turnCredentialsUrl` were all deleted
+rather than left as dead options. Don't reintroduce TURN unless the
+relay is somehow unavailable; it's more moving parts for the same
+outcome.
 
-Why a Worker rather than pasting credentials into `config.js`:
-Cloudflare deliberately only issues SHORT-LIVED credentials, minted from
-a long-term key that must stay server-side. `worker/turn-worker.js` is
-that server side and nothing more — it holds the key as a secret, calls
-Cloudflare's `generate-ice-servers` endpoint, and returns only the
-short-lived result. `Multiplayer._fetchTurnServers()` calls it once per
-session (cached), filters out the credential-less bare-STUN entry, and
-hands the rest to Trystero as `turnConfig`.
-
-`turnConfig` is used rather than `rtcConfig` on purpose: it ADDS to
-Trystero's own default STUN servers instead of replacing the whole ICE
-list, so we keep every path we had plus the new one.
-
-**Every failure mode degrades to today's behaviour, never worse** —
-Worker absent, misconfigured, unreachable, timing out (6s cap),
-returning non-JSON, or returning no usable credentials all resolve to
-"no TURN, plain P2P" with a console warning. Verified by testing each
-case explicitly. `CONFIG.coop.turnServers` still exists alongside it for
-providers that DO issue long-lived credentials (Metered, Twilio, Xirsys,
-self-hosted coturn); the two are combined.
-
-**A note on why NOT a centralized WebSocket relay** (Supabase Realtime,
-PartyKit, Firebase): those would fix NAT completely and were seriously
-considered. They were rejected because they concentrate the whole game
-behind one company's domain, which is both trivially blockable at a
-national level (Supabase was blocked country-wide in India in Feb 2026)
-and subject to sanctions geo-blocking that would refuse some players
-outright. Trystero's ~45 independent nostr relays are far harder to
-block than any single vendor domain, so the P2P architecture is
-deliberately KEPT and TURN bolted on, rather than replaced. If you ever
-do move to a central relay, note that `Game` only touches 12
-`Multiplayer.*` members and nothing outside `js/multiplayer.js`
-references Trystero — the transport is genuinely swappable in one file.
+**The centralization tradeoff, honestly:** the relay is one server on
+one domain, so a country-level block of `workers.dev` would take co-op
+down, whereas Trystero's ~45 independent nostr relays are much harder to
+block wholesale. That's why P2P was KEPT as a fallback rather than
+deleted, and why `transport: "auto"` tries the relay first and silently
+falls back. If you ever swap transports again, note that `Game` only
+touches ~12 `Multiplayer.*` members and nothing outside
+`js/multiplayer.js` references Trystero or WebSockets — the transport is
+genuinely swappable in one file, which is exactly how the relay was
+added without touching game logic at all.
 
 **Making it testable:** `CONFIG.coop.debug` (on by default) logs the
-room/relay/TURN setup on connect and drives a live status line in the
-lobby — `● relays 16/20 · peers 1 · TURN off` — polled once a second by
-`Game.mpStartLobbyPolling()` and rendered by `UI.renderMpConnStatus()`.
-Green means signaling is up. If relays are green on both machines and
-peers still reads 0 after ~10s, that is the NAT/TURN problem above, not
-a code problem — which is the distinction that used to be impossible to
-make from the outside.
+transport on connect and drives a live status line in the lobby —
+`● relay connected · peers 1`, or `● relays 16/20 · peers 1 · P2P` on
+the fallback — polled once a second by `Game.mpStartLobbyPolling()` and
+rendered by `UI.renderMpConnStatus()`. That readout is the difference
+between "co-op is randomly broken" and an actual diagnosis.
 
 ### Known gaps (co-op)
 
@@ -1070,10 +1043,10 @@ make from the outside.
   `bindUI()`.
 - **Chests are not synced**, deliberately — see "buffs/tools/chests stay
   entirely local" above; this matches the spec, not a cut corner.
-- **Bayat AI only targets the host's own player**, never a remote peer —
-  spawning is peer-aware (see above) but chase/flee behavior isn't. A
-  Bayat that spawned near a peer just stands there rather than reacting
-  to them, until that peer walks up and hugs it themselves.
+- ~~Bayat AI only targets the host's own player~~ **FIXED** — see bug
+  history #23. `BayatManager.update()` now picks the NEAREST player
+  (host or any non-downed peer) per Bayat and passes that as the AI
+  target. Solo takes the identical path it always did.
 
 ## Rendering / animation conventions
 
@@ -1325,6 +1298,261 @@ bayatSpeedMult)`, a truthiness check, and `0` is falsy in JS, so the
     gate: (a) alone still leaves the very first scare of a session, and
     any interrupted seek, able to show a stale frame.
 
+17. Real-world report from live co-op: **the non-host player saw no
+    Bayats at all.** They were arriving fine — the relay delivered every
+    `bayatSnapshot`, `applySnapshot()` created the Bayats, and they were
+    alive and correctly positioned. They were drawn at **1/1000th size**.
+    `Bayat.draw()` scales the sprite by `spawnT` for the spawn-in pop,
+    `spawnT` is initialised to `0.001`, and only `Bayat.update()` — the
+    HOST path — ever advances it. `updatePuppet()`, which non-hosts use
+    instead, never touched it, so every puppet stayed at 0.001 forever.
+    Diagnosed by testing each half separately against the live Worker
+    (host emitted 19 snapshots; joiner received and applied them), which
+    ruled out the network entirely and pointed straight at render state.
+    Fixed by advancing `spawnT` in `updatePuppet()`.
+
+    The same audit found a live sibling: `frozenT`/`slowT`/`stunT`/
+    `hookedT`/`anchorT`/`throwFlashT` are also decayed only in
+    `update()`, yet a non-host's OWN tools still set them on puppets
+    (tools.js writes to whatever is in the list). One Gem of Time would
+    have left every Bayat frozen-tinted on the joiner's screen for the
+    rest of the run. Fixed in the same place — decaying the timers only,
+    never the movement they drive, since a puppet's position belongs to
+    the host.
+
+    **General lesson:** `updatePuppet()` is a parallel per-frame path to
+    `update()`. Any per-frame VISUAL state added to `update()` has to be
+    mirrored there or it silently breaks for non-hosts only — the
+    hardest kind of bug to notice, because the host's screen looks
+    perfect.
+
+21. Real-world report from live co-op on the Cloudflare relay: "the
+    ping is so bad I couldn't hug a single Bayat." Two separate causes,
+    both design flaws rather than a slow connection — measured median
+    one-way hop (peer→relay→peer) was only ~116ms, spiking to ~270ms:
+
+    (a) **A non-host's hug cost a full round trip before ANYTHING
+    happened.** The host resolves its own hugs instantly, but a joiner
+    sent a `hugClaim` and then just waited (~230ms median, ~540ms on a
+    spike) — you'd touch a Bayat, see nothing, and watch it drift off.
+    Fixed with **client-side prediction** in `mpRequestHug()`: the
+    joiner immediately hides the Bayat and plays its death fx, then the
+    authoritative `hugResult` supplies the actual reward. Measured 51ms
+    to visual feedback instead of ~230ms.
+    Deliberately NOT predicted: the reward itself (EXP/time/combo).
+    Rolling those back on a rejected claim means unwinding a possible
+    level-up, which is genuinely nasty to get right, whereas the reward
+    landing ~200ms later is imperceptible. A rejected claim needs no
+    rollback at all — the host still has the Bayat, so the next
+    `bayatSnapshot` simply re-creates it (verified: re-appears, no
+    phantom reward). `mpPendingClaims` now stores the Bayat OBJECT
+    rather than `true`, because prediction splices it out of
+    `bayats.list` and `mpOnHugResult` would otherwise have nothing to
+    award against; `applyHugReward(bayat, isChainHug, visualsAlreadyPlayed)`
+    gained the third arg so the confirmation doesn't replay fx the
+    prediction already showed.
+
+    (b) **Puppet Bayats always trailed their true position** — snapshots
+    are 8Hz (125ms) and `updatePuppet()` lerped toward the LAST KNOWN
+    point, so a joiner chased where a Bayat used to be. Fixed with dead
+    reckoning: `applySnapshot()` estimates velocity from consecutive
+    samples (ignoring absurd gaps from a backgrounded tab), and
+    `updatePuppet()` aims at the position projected forward by the
+    snapshot's real age, capped at 0.3s so a stalled host parks puppets
+    instead of flinging them off-screen. Verified deterministically —
+    leads 14.7px at 125ms staleness vs 14.8px expected, and the cap
+    holds at a simulated 5s stall.
+
+    **Testing note:** the extrapolation keys off wall-clock
+    `performance.now()`, which is correct under RAF but means an
+    instant-loop test measures nothing (the clock never advances) and a
+    real-time test is defeated by background-tab timer throttling. The
+    deterministic approach — inject a known `netStamp` age and assert
+    the lead distance — is the one that actually works headlessly.
+
+22. Follow-up to #21 ("make the whole multiplayer faster"). Three more
+    changes, each measured rather than assumed:
+
+    (a) **Remote PLAYER puppets had no dead reckoning** — #21 gave it to
+    Bayats but `mpUpdateNetworking()` still lerped teammates toward their
+    last known point, so every other player rendered a full tick +
+    latency behind and looked rubber-bandy. `mpOnPlayerState()` now
+    estimates velocity between samples (verified: 260px/s for a 13px gap
+    over 50ms) and the puppet aims at the projected position.
+
+    (b) **Snapshot culling.** A full arena was ~4KB per snapshot
+    (~118 MB/hour at 8Hz) and most of it was Bayats nobody was near.
+    The host now only sends Bayats within a radius of SOME player
+    (`this.player` + every `mpPeers` entry — verified it keeps Bayats
+    near a REMOTE teammate, not just the host's own).
+
+    The radius is computed per-frame from the real viewport
+    (`half the camera diagonal + CONFIG.coop.snapshotCullMargin`), NOT a
+    fixed constant. First attempt used a flat 1800px, which covers 58% of
+    the 4200x4200 arena and saved only 30% — so raising the tick rate on
+    top of it made bandwidth *worse* (155 MB/h vs 117). Deriving it from
+    the viewport gives an 81% cut instead. Don't replace this with a
+    constant: too small clips visible Bayats on an ultrawide, too large
+    saves nothing on a laptop.
+
+    (c) **Tick rates raised** 12→20Hz (playerState) and 8→15Hz
+    (bayatSnapshot) — affordable only *because* of (b). Net result:
+    **42.8 MB/hour at 15Hz vs 117.7 MB/hour at 8Hz** — roughly double the
+    update rate for a third of the bandwidth. Cloudflare bills inbound WS
+    messages 20:1, so a 2-player run is ~2.8 billed req/s.
+
+    **Testing note (cost real time twice):** anything timing-dependent is
+    unmeasurable in a hidden browser pane — background tabs throttle
+    `setTimeout` to ~1s, which silently exceeded the 0.5s "absurd gap"
+    guard and made a correct velocity estimate read as `0`. Same class of
+    trap as #21's wall-clock issue. For any of this, assert the maths
+    deterministically (inject a known timestamp) instead of trying to
+    measure real elapsed time.
+
+23. "Use everything you can to improve the ping and the actual feel."
+    Profiling the *feel* rather than the wire found that the two worst
+    problems weren't latency at all — measured ping was a fine ~116ms:
+
+    (a) **About two thirds of the tools did nothing for a non-host.**
+    tools.js writes CC/pull timers directly onto whatever Bayats are in
+    the list (`n.hookedT = Math.max(...)`, ~40 sites). On a joiner those
+    are puppets, and `updatePuppet()` only DECAYS those timers — it never
+    applies the movement they drive, since a puppet's position belongs to
+    the host. So every pull, freeze, slow, stun and anchor tool —
+    Grappling Hook, Vacuum, Magnet, Rope, Boomerang, Static Cling,
+    Anchor, Tesla, Cupid, Gem of Time, Net... — was silently inert for
+    anyone who wasn't hosting. Half your build did nothing, which reads
+    as "clunky and unplayable" far more than any ping.
+
+    Fixed by relaying effects to the host, which owns the sim: rather
+    than rewrite ~40 call sites, `Game` diffs the CC fields around
+    `tools.update()` and sends whatever INCREASED (`bayatEffect`). The
+    host applies it and the movement comes back through the normal
+    snapshot. One choke point, and it automatically covers any tool
+    added later. Verified: hook + freeze both relayed, exactly ONE
+    message per cast (no per-frame traffic).
+
+    Pulls carry the caster's peer id, resolved LIVE each frame in
+    `Bayat.update()` rather than baked in at cast time, so a Bayat
+    tracks the player who pulled it as they move instead of being yanked
+    toward the host. Verified a peer's hook drags the Bayat toward the
+    peer (x 2000→2207 with the peer at 3000, host at 1000).
+
+    (b) **Bayats ignored remote players entirely** (was a documented
+    "known gap"). AI took the host's player unconditionally, so on a
+    joiner's screen Bayats sat motionless as you walked up, or fled
+    *toward* you because they were running from someone across the map.
+    `BayatManager.update()` now targets the nearest player among the
+    host and every non-downed peer. Verified a Bayat next to a remote
+    peer now flees it (distance 60→158); downed teammates are excluded,
+    since a downed player shouldn't scare anything.
+
+    **Perf note:** the CC diff runs every frame of every co-op run, so it
+    reuses a persistent Map/array buffer and allocates nothing on a quiet
+    frame. The first version allocated a Map plus an object per Bayat per
+    frame (~1800 objects/sec) — self-caught and rewritten, because GC
+    hitches are exactly the stutter this pass existed to remove.
+
+24. "Is there a library that would make co-op actually good?" — the
+    honest answer turned out to be no, and the investigation found the
+    real problem instead.
+
+    **On libraries:** Colyseus, nengi and Geckos.io are the real options
+    and all need a Node server, which is the exact thing that couldn't be
+    hosted (see #the relay saga). Playroom is zero-backend but is a
+    hosted third-party service and a full rewrite. None would have fixed
+    this anyway — what was wrong was a technique choice, not a missing
+    dependency.
+
+    **A hypothesis of mine that was WRONG, and the measurement that
+    killed it:** #21/#23 added velocity extrapolation, and I suspected it
+    was causing rubber-banding, since Bayats steer randomly every frame
+    (`wanderAngle += rand(-0.7,0.7) * turnRate`) and extrapolating an
+    erratic mover overshoots. Simulated both against an erratic path and
+    measured frame-to-frame position jumps: **zero snap frames either
+    way**, max jump 1.95px (extrapolation) vs 1.96px (interpolation)
+    against a true physical max of 1.97px. The lerp smoothing had been
+    absorbing the overshoot all along. Switched to snapshot interpolation
+    anyway — it is never a guess, which is strictly safer — but it was
+    NOT the fix, and claiming otherwise would have been a story rather
+    than a diagnosis.
+
+    **What actually was wrong — found by building a measurement instead
+    of theorising.** Added an in-run netcode HUD (press **N** in co-op;
+    `UI.renderNetStats()` + `Multiplayer.netStats`) reporting ping, min/
+    max, jitter, snapshot gap and msgs/sec. First real reading:
+    **ping 151ms but jitter 65ms, spiking to 315ms.** Average ping was
+    never the problem — the VARIANCE was. A fixed 100ms interpolation
+    buffer is under water on every one of those spikes, so the buffer
+    runs dry and motion stutters.
+
+    Fixed by making the buffer adaptive (`Game.mpInterpDelay()`): one
+    snapshot interval + 2x measured jitter, clamped to
+    [interpDelayMinMs, interpDelayMaxMs]. On this connection that's
+    **197ms instead of 100ms**; on a clean connection it tightens to 80ms
+    on its own. Set `CONFIG.coop.adaptiveInterp:false` to pin it.
+
+    **Two process lessons.** (1) The ping originally broadcast and waited
+    for a peer to echo, so it silently reported nothing at all while you
+    sat alone in a lobby — precisely when you'd want to check your
+    connection. It now addresses the ping to ITSELF; the relay's targeted
+    path looks the recipient up in the room's peer map, which includes
+    the sender (verified against the deployed Worker: 124ms solo round
+    trip, no redeploy needed). (2) Two tests in a row produced confident
+    nonsense — one measured a `selftest` echo without ever calling
+    `send`, another compared interpolation strategies in an instant loop
+    where the wall clock never advanced. Check that a test can actually
+    observe the thing it claims to measure BEFORE trusting its verdict.
+
+25. "Why does it have 1KB every snapshot, and a snapshot about every
+    SECOND?" Both halves of that were right, and the second one was the
+    real cause of the remaining clunkiness — not ping, which I had been
+    chasing.
+
+    (a) **The network tick rate was chained to the render frame rate, at
+    HALF of it.** `loop()` clamps `dt` to 0.05s so one long frame can't
+    explode the physics — correct for the sim — but that same clamped dt
+    was driving the send timers. So a host below 20fps sent snapshots
+    slower than its own frame rate, and a BACKGROUNDED host (RAF throttled
+    to ~1fps) sent one every two seconds. The joiner then has nothing to
+    interpolate between and everything moves in visible steps. Measured
+    sends/sec by host fps, before -> after:
+    60fps 12 -> 15.4, 20fps 10 -> 15.6, 10fps 5 -> 10.3, 5fps 2.5 -> 5.4.
+    Note 60fps was 12, not the configured 15: resetting a countdown to an
+    absolute `1/Hz` throws away the leftover past zero. Both fixed by
+    scheduling on wall-clock deadlines (`mpNextPlayerSend`/`mpNextBayatSend`)
+    advanced by exactly one interval, with `Math.max(now, ...)` so a stall
+    can't fire a catch-up burst. **Never drive network cadence from the
+    clamped frame dt.**
+
+    (b) **~1.4KB per snapshot, about two thirds of it repetition.** Every
+    Bayat was sent as `{"id":123,"t":"normal","x":1234,"y":2345}` — JSON
+    keys that never vary, and a type string re-sent 12x a second for a
+    value fixed for the Bayat's whole life. Positions now ride in one flat
+    `[id,x,y,id,x,y,...]` array and a type is sent only when a Bayat is
+    INTRODUCED. **518 bytes vs 1381 (-62%)**, and total bandwidth fell
+    56.9 -> 27.4 MB/h despite the tick rate going UP.
+
+    The `n` introductions are re-sent in full every
+    `CONFIG.coop.snapshotKeyframeMs` (3s) so the stream self-heals: a
+    client that reloaded or joined late relearns types instead of being
+    permanently blind to Bayats it never saw spawn. Verified by replaying
+    a captured 76-snapshot stream into a fresh receiver starting HALFWAY
+    through — ids matched exactly, zero wrong types, full parity in 0.6s.
+    An id with no known type is skipped rather than guessed. The old
+    `{list:[...]}` shape is still accepted, so a peer on a stale cache
+    still plays.
+
+    **Test traps hit again in this round, all previously documented:**
+    a tight `while` loop calling `update()` advanced 60 SIM seconds in
+    0.27 real seconds and ended the Arcade run, truncating the capture to
+    4 snapshots; comparing the joiner against ALL host Bayats "failed"
+    because snapshots are deliberately culled to what's near a player, so
+    the joiner correctly knows fewer; and the browser served stale JS
+    until the page was moved to a fresh port. Now that cadence is
+    wall-clock, any timing test MUST pace frames in real time (busy-wait)
+    rather than feeding a fake dt.
+
 ## Known gaps / honest limitations
 
 - Animation is all _procedural_ (tint-flash, squash/stretch, quantized
@@ -1336,14 +1564,14 @@ bayatSpeedMult)`, a truthiness check, and `0` is falsy in JS, so the
   change.
 - Only 5 arenas exist. A "toxic swamp" and "void arena" were discussed in
   early brainstorming but never built.
-- Dead code: `CURSES`, `RARITY_TABLE`, `rollChaosRewards`,
-  `applyChaosReward`, `UI.showChaosModal` are leftovers from an older
-  chest design (golden/cursed/chaos/evolution chest kinds) that was
-  replaced by the current 3-tier system. Nothing calls them anymore —
-  safe to delete, left in place only to avoid churn. **Don't confuse
-  this with `CURSED_ITEMS`** (Chaos Update) — that's a separate, live,
-  actually-wired-up system; the similar naming is coincidental (the old
-  `CURSES` predates the Chaos Update entirely).
+- **Old chaos-chest code is now DELETED**, not just unused: `CURSES`,
+  `RARITY_TABLE`, `pickRarity`, `rollChaosRewards`, `applyChaosReward`,
+  `Game.applyCurse` and `UI.showChaosModal` are gone. Note that
+  `Game.applyCurse()` was NOT previously listed as dead but was — it was
+  the only `CURSES` consumer and nothing called it, so the whole chain
+  went together. Verified by grepping every symbol for callers first.
+  **`CURSED_ITEMS` (Chaos Update) is a different, live system** — the
+  similar naming was always coincidental.
 
 ## Testing
 

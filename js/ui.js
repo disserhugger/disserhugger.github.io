@@ -406,12 +406,25 @@ const UI = {
     const s = Multiplayer.netStats || {};
     const expectedSnap = Math.round(1000 / CONFIG.coop.bayatSnapshotHz);
     const rate = (v, good, ok) => (v <= good ? "ns-good" : v <= ok ? "ns-ok" : "ns-bad");
+    const peerCount = Object.keys(Multiplayer.peers || {}).length;
     el.innerHTML =
       `<div class="ns-row"><span>ping</span><b class="${rate(s.rttMs, 80, 160)}">${s.rttMs || "–"} ms</b></div>` +
       `<div class="ns-row"><span>jitter</span><b class="${rate(s.jitterMs, 15, 40)}">${s.jitterMs || 0} ms</b></div>` +
       `<div class="ns-row"><span>min/max</span><b>${s.rttMin || 0}/${s.rttMax || 0}</b></div>` +
-      `<div class="ns-row"><span>snap gap</span><b class="${rate(Math.abs((s.lastSnapshotAgeMs || 0) - expectedSnap), 20, 50)}">${s.lastSnapshotAgeMs || 0} ms</b><small>~${expectedSnap}</small></div>` +
-      `<div class="ns-row"><span>msgs/s</span><b>${s.msgsPerSec || 0}</b></div>` +
+      // A snap gap of literally 0 means NO snapshot has ever arrived, not a
+      // perfect 0ms gap (two in the same millisecond is impossible). Showing
+      // it as a red "0" reads like a measurement; it's the absence of one.
+      `<div class="ns-row"><span>snap gap</span>` +
+      (s.lastSnapshotAgeMs
+        ? `<b class="${rate(Math.abs(s.lastSnapshotAgeMs - expectedSnap), 20, 50)}">${s.lastSnapshotAgeMs} ms</b>`
+        : `<b class="ns-bad">none</b>`) +
+      `<small>~${expectedSnap}</small></div>` +
+      // A live joiner should see roughly bayatSnapshotHz + playerStateHz
+      // here. Around 1 means nothing but your own ping echo is arriving.
+      `<div class="ns-row"><span>msgs/s</span><b class="${rate(20 - Math.min(20, s.msgsPerSec || 0), 5, 14)}">${s.msgsPerSec || 0}</b></div>` +
+      // Peers is the first thing to check when msgs/s is near zero: 0 peers
+      // means you are alone in the room, not that the netcode is broken.
+      `<div class="ns-row"><span>peers</span><b class="${peerCount ? "ns-good" : "ns-bad"}">${peerCount}</b></div>` +
       `<div class="ns-row"><span>role</span><b>${Multiplayer.isHost ? "HOST" : "peer"}</b></div>` +
       `<div class="ns-row"><span>interp</span><b>${Math.round(Game.mpInterpDelay())} ms</b><small>${CONFIG.coop.adaptiveInterp ? "auto" : "fixed"}</small></div>`;
   },

@@ -12,6 +12,22 @@ name = "bayat-coop-relay"
 main = "relay-worker.js"
 compatibility_date = "2026-01-01"
 
+# Where each room's Durable Object is placed. This is the single biggest
+# lever on co-op ping: every message travels player -> object -> player,
+# so the object wants to sit between the players, not next to whoever
+# happens to open the room first.
+#
+# Unset = Cloudflare chooses automatically, which is NOT always close.
+# Valid: wnam enam sam weur eeur apac apac-ne apac-se oc afr me
+#   eeur = Eastern Europe   weur = Western Europe   me = Middle East
+#   enam = Eastern N.America  wnam = Western N.America
+#
+# Change it, redeploy, and measure with the in-game N panel. Ping is the
+# number that should move; it takes a NEW room code to take effect,
+# because placement is fixed when a room is first opened.
+[vars]
+DO_LOCATION_HINT = "eeur"
+
 [[durable_objects.bindings]]
 name = "COOP_ROOM"
 class_name = "CoopRoom"

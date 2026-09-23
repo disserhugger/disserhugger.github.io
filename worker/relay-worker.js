@@ -77,6 +77,23 @@ export class CoopRoom {
       } catch {
         return; // ignore malformed frames rather than dropping the socket
       }
+      /* Diagnostic: "where is this room actually running?" A Durable
+         Object cannot read its own location directly, but a subrequest
+         made FROM the object is served by the colo the object lives in,
+         so the trace reports the object's home rather than the caller's.
+         Cached, because this costs a real round trip. */
+      if (msg && msg.type === "msg" && msg.action === "__where") {
+        this.whereColo
+          ? this.send(server, { type: "msg", action: "__where", data: { colo: this.whereColo }, from: "relay" })
+          : fetch("https://www.cloudflare.com/cdn-cgi/trace")
+              .then((r) => r.text())
+              .then((t) => {
+                this.whereColo = (t.match(/^colo=(\w+)/m) || [])[1] || "?";
+                this.send(server, { type: "msg", action: "__where", data: { colo: this.whereColo }, from: "relay" });
+              })
+              .catch(() => {});
+        return;
+      }
       if (!msg || msg.type !== "msg" || typeof msg.action !== "string") return;
 
       const out = {
@@ -139,6 +156,11 @@ export default {
           service: "bayat-coop-relay",
           runtime: "cloudflare-durable-objects",
           hint: "Connect with wss://<this-host>/room/<ROOMCODE>",
+          // Which Cloudflare edge served YOU. Compare against the room's
+          // colo (send {"type":"msg","action":"__where"} on a socket) to
+          // see how far your traffic travels past the edge.
+          yourEdgeColo: request.cf?.colo || null,
+          roomLocationHint: env.DO_LOCATION_HINT || "(automatic)",
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
@@ -154,6 +176,26 @@ export default {
     // to the same Durable Object instance, anywhere in the world, which
     // is what lets two players actually meet.
     const id = env.COOP_ROOM.idFromName(roomCode);
-    return env.COOP_ROOM.get(id).fetch(request);
+
+    /* WHERE that instance physically lives decides your ping, and it is
+       chosen ONCE, when the room is first opened — "a data center close
+       to where the initial get() request is made". Close to Cloudflare's
+       view of you, which is not always close to you: from Turkey the
+       measured round trip through an unhinted object was ~118ms median,
+       far more than the region itself can explain.
+
+       DO_LOCATION_HINT (set in wrangler.toml) pins it instead. Valid
+       values: wnam enam sam weur eeur apac apac-ne apac-se oc afr me.
+       Hints are best-effort — Cloudflare picks a data centre chosen to
+       minimise latency FROM the hint, not necessarily inside it.
+
+       Pick the hint nearest the players, not nearest the host: every
+       message goes player -> object -> player, so the object wants to sit
+       between them. Leave it unset to keep Cloudflare's automatic choice. */
+    const hint = env.DO_LOCATION_HINT;
+    const stub = hint
+      ? env.COOP_ROOM.get(id, { locationHint: hint })
+      : env.COOP_ROOM.get(id);
+    return stub.fetch(request);
   },
 };
