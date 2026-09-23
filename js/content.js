@@ -29,6 +29,33 @@ const MP_COLORS = [
    Color variants are produced by SpriteTint (see below), which recolors
    only the visible (alpha>0) pixels of the sprite and leaves transparent
    pixels fully transparent — no colored fringing, no filter hacks. */
+// Shared defaults for every Nasser variant — see the NASSERS block at the
+// bottom of BAYAT_TYPES. Each variant only lists what makes it different.
+function nasserType(overrides) {
+  return Object.assign(
+    {
+      patrolType: true,
+      spriteKey: "nasser", // its own sprite (ASSETS.nasser), not the Bayat one
+      legMult: 1,
+      patrolSpeedMult: 1,
+      speedMult: 1.0,
+      sizeMult: 1.0,
+      expMult: 1.3,
+      rewardMult: 1.3,
+      color: "#f5d9a8",
+      dark: "#b8945e",
+      flee: false,
+      danger: false,
+      glow: false,
+      tintColor: null,
+      tintStrength: 0,
+      badge: "",
+      badgeColor: "#fff",
+      slipChance: 0,
+    },
+    overrides,
+  );
+}
 const BAYAT_TYPES = {
   normal: {
     key: "normal",
@@ -437,6 +464,137 @@ const BAYAT_TYPES = {
     jitter: 2.0,
     slipChance: 0.02,
   },
+
+  /* ---- NASSERS — the patrol family (see CLAUDE.md "Nassers") ----
+     Not a new class: `patrolType` routes Bayat.update() into
+     updatePatrol() instead of the steering-force chain, so a Nasser gets
+     hug arbitration, snapshots, CC timers, death fx and combos for free.
+     They spawn from their OWN pool and timer (BayatManager.pickNasserType,
+     CONFIG.nasser.spawnInterval), never the Bayat one — so weightBase and
+     minDiff here are relative to the other Nassers only.
+
+     Per-type patrol knobs (everything shared lives in CONFIG.nasser):
+       legMult          x CONFIG.nasser.legLength
+       patrolSpeedMult  x CONFIG.nasser.speedMult (NOT speedMult, which
+                        stays 1 — a Nasser's speed is its own system)
+       patrolPause      stands still pauseDuration at each end (Pacer)
+       patrolTurn       turns 90deg at each end -> walks a square (Turner)
+       formation        spawns as a row of lineCountMin..Max (Line)
+       patrolBounce     no fixed leg; turns at walls + decor (Bouncer)
+       bulldozer        head-on contact costs time + hard knockback
+     `flee:false` does NOT mean "dangerous lurker" here; patrolType is
+     checked before that branch. turnRate/jitter/slip are absent/zero on
+     purpose — predictability is the whole design. */
+  nasser: nasserType({
+    key: "nasser",
+    label: "Nasser",
+    weightBase: 10,
+    minDiff: 0,
+  }),
+  pacer: nasserType({
+    key: "pacer",
+    label: "Pacer Nasser",
+    legMult: 0.55,
+    patrolPause: true, // the pause is your window — the friendliest catch
+    expMult: 1.1,
+    rewardMult: 1.1,
+    weightBase: 7,
+    minDiff: 0,
+    tintColor: "#7fd8e8",
+    tintStrength: 0.35,
+    badge: "‖", // ‖ (pause)
+    badgeColor: "#bff3ff",
+  }),
+  marcher: nasserType({
+    key: "marcher",
+    label: "Marcher Nasser",
+    legMult: 1.6,
+    patrolSpeedMult: 1.7, // commit to the intercept well ahead of it
+    expMult: 1.7,
+    rewardMult: 1.7,
+    weightBase: 5,
+    minDiff: 0.12,
+    tintColor: "#6fe3a3",
+    tintStrength: 0.4,
+    badge: "»", // »
+    badgeColor: "#c8ffe0",
+  }),
+  turner: nasserType({
+    key: "turner",
+    label: "Turner Nasser",
+    legMult: 0.8,
+    patrolTurn: true, // walks a square — watch one lap and it's readable
+    expMult: 1.6,
+    rewardMult: 1.6,
+    weightBase: 5,
+    minDiff: 0.18,
+    tintColor: "#a970ff",
+    tintStrength: 0.4,
+    badge: "↻", // ↻
+    badgeColor: "#e2d0ff",
+  }),
+  line: nasserType({
+    key: "line",
+    label: "Nasser Line",
+    formation: true, // a whole row = a combo waiting to happen
+    expMult: 1.15,
+    rewardMult: 1.15,
+    weightBase: 3,
+    minDiff: 0.25,
+    tintColor: "#ffd76a",
+    tintStrength: 0.3,
+    badge: "≡", // ≡
+    badgeColor: "#fff1c2",
+  }),
+  bulldozer: nasserType({
+    key: "bulldozer",
+    label: "Bulldozer Nasser",
+    legMult: 1.1,
+    patrolSpeedMult: 1.1,
+    bulldozer: true, // the real Goomba: safe from behind, OUCH head-on
+    expMult: 2,
+    rewardMult: 2,
+    weightBase: 4,
+    minDiff: 0.15,
+    tintColor: "#ff2d4d", // reads like a Dangerous Bayat on purpose
+    tintStrength: 0.55,
+    badge: "▲", // ▲
+    badgeColor: "#ffbfca",
+  }),
+  bouncer: nasserType({
+    key: "bouncer",
+    label: "Bouncer Nasser",
+    patrolBounce: true, // its route changes as decor gets broken
+    patrolSpeedMult: 1.25,
+    expMult: 1.5,
+    rewardMult: 1.5,
+    weightBase: 4,
+    minDiff: 0.3,
+    tintColor: "#ff7ab8",
+    tintStrength: 0.4,
+    badge: "↕", // ↕
+    badgeColor: "#ffd9f0",
+  }),
+  grand: nasserType({
+    key: "grand",
+    label: "THE GRAND NASSER",
+    miniBoss: true,
+    legMult: 8.75, // ~half the arena
+    // Faster than an unbuffed player: you can't win the race, and you
+    // can't stand on its lane either (that's its face) — you have to
+    // cut in from the side as it passes. A puzzle, not a chase.
+    patrolSpeedMult: 2.8,
+    sizeMult: 1.5,
+    expMult: 8,
+    rewardMult: 8,
+    glow: true,
+    weightBase: 0.6,
+    minDiff: 0.4,
+    tintColor: "#ffd76a",
+    tintStrength: 0.45,
+    badge: "★", // ★
+    badgeColor: "#fff1b0",
+  }),
 };
 
 /* Boost Bayat reward pool — hugging one grants a random temporary buff.

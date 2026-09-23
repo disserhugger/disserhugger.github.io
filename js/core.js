@@ -15,6 +15,8 @@ const Sprites = {
   bayat: null,
   buddy: null,
   jumpscare: null,
+  nasser: null,
+  nasserLoaded: false,
   playerLoaded: false,
   bayatLoaded: false,
   buddyLoaded: false,
@@ -35,6 +37,7 @@ loadSprite("player", ASSETS.player);
 loadSprite("bayat", ASSETS.bayat);
 loadSprite("buddy", ASSETS.buddy);
 loadSprite("jumpscare", ASSETS.jumpscare);
+loadSprite("nasser", ASSETS.nasser);
 
 /* =========================================================
    OPTIONAL MEDIA (video / audio) — same graceful-degradation contract as

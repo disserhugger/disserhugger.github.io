@@ -337,6 +337,15 @@ class Bayat {
       (1 + difficulty * 0.35) *
       (Game.arena ? Game.arena.bayatSpeedMult : 1);
     if (type.bombType) this.baseSpeed *= CONFIG.bomb.movementSpeedMult;
+    if (type.patrolType) {
+      this.baseSpeed *= CONFIG.nasser.speedMult * (type.patrolSpeedMult || 1);
+      this.legLength = CONFIG.nasser.legLength * (type.legMult || 1);
+      this.patrolPauseT = 0;
+      // A valid default leg so every creation path (co-op puppets, tests)
+      // has patrol state. BayatManager.spawnPatrol() replaces it with a
+      // validated, grid-snapped one for real spawns.
+      this.initPatrol(Math.random() < 0.5 ? "h" : "v", Math.random() < 0.5 ? 1 : -1);
+    }
     this.wanderAngle = Math.random() * TAU;
     this.animT = Math.random() * 10;
     this.frozenT = 0;
@@ -475,6 +484,15 @@ class Bayat {
       if (Game.slipsWatched >= 10) Game.checkAchievement("slips10");
       return;
     }
+    // Nassers: checked BEFORE the steering chain below, whose final else
+    // assumes "!flee means dangerous lurker". A Nasser isn't steered by
+    // forces at all — no flee, no separation, no wander, no Black Hole
+    // drift — it just walks its lane. Tool CC (freeze/stun/hook/anchor)
+    // still lands via the early returns above, exactly like any Bayat.
+    if (this.type.patrolType) {
+      this.updatePatrol(dt);
+      return;
+    }
     let fx = 0,
       fy = 0;
     const dx = this.x - player.x,
@@ -568,6 +586,197 @@ class Bayat {
     this.x = clamp(this.x, this.radius, CONFIG.arena.width - this.radius);
     this.y = clamp(this.y, this.radius, CONFIG.arena.height - this.radius);
   }
+  /* ---- Nasser patrol (patrolType) ----
+     A lane is: an axis ("h"/"v"), a fixed perpendicular coordinate
+     (patrolLine), and an along-axis range [patrolLo, patrolHi]. The Nasser
+     walks toward one end at constant speed, flips patrolDir, repeats.
+     patrolVer bumps whenever the lane changes, so the co-op host knows to
+     re-send it for joiners' path hints. */
+  initPatrol(axis, dir) {
+    this.patrolAxis = axis;
+    this.patrolDir = dir;
+    this.patrolLine = axis === "h" ? this.y : this.x;
+    const along = axis === "h" ? this.x : this.y;
+    this.setPatrolRange(dir > 0 ? along : along - this.legLength);
+    // Start at one END of the leg, walking toward the other (if clamping
+    // moved the range, put it back on its start end). A Bouncer's "leg" is
+    // the whole arena width, so it just starts where it spawned.
+    const start = this.type.patrolBounce
+      ? clamp(along, this.patrolLo, this.patrolHi)
+      : dir > 0
+        ? this.patrolLo
+        : this.patrolHi;
+    if (axis === "h") this.x = start;
+    else this.y = start;
+    this.patrolKnown = true;
+  }
+  // Places [lo, lo+legLength] on the current axis, shifted (not shrunk)
+  // to sit fully inside the arena walls. A Bouncer ignores `lo` and gets
+  // wall-to-wall — its real turnarounds are decor, see updatePatrol().
+  setPatrolRange(lo) {
+    const cfg = CONFIG.nasser;
+    const m = cfg.edgeMargin + this.radius;
+    const max = (this.patrolAxis === "h" ? CONFIG.arena.width : CONFIG.arena.height) - m;
+    const L = this.type.patrolBounce ? max - m : Math.min(this.legLength, max - m);
+    lo = clamp(lo, m, max - L);
+    this.patrolLo = lo;
+    this.patrolHi = lo + L;
+    // Keep the lane line itself inside the arena too.
+    const pmax = (this.patrolAxis === "h" ? CONFIG.arena.height : CONFIG.arena.width) - m;
+    this.patrolLine = clamp(this.patrolLine, m, pmax);
+    this.patrolVer = (this.patrolVer || 0) + 1;
+  }
+  updatePatrol(dt) {
+    const cfg = CONFIG.nasser;
+    const h = this.patrolAxis === "h";
+    let along = h ? this.x : this.y;
+    const perp = h ? this.y : this.x;
+    const tol = cfg.relaneTolerance;
+    // Knocked or pulled off its lane by a tool: DON'T snap back (that
+    // reads as broken rubber-banding). Re-lane on the same axis, centred
+    // on wherever it landed, and carry on in the same direction.
+    // A small slide ALONG its own lane (e.g. a stun's drift carrying it a
+    // few px past an end) is just clamped back — re-laning for that would
+    // shift the route for no visible reason.
+    const slack = cfg.relaneAlongSlack;
+    if (
+      Math.abs(perp - this.patrolLine) > tol ||
+      along < this.patrolLo - slack ||
+      along > this.patrolHi + slack
+    ) {
+      this.patrolLine = perp;
+      this.setPatrolRange(along - this.legLength / 2);
+      // Knocked out of its row: it's on its own now, or it would drag the
+      // rest of the Line's freeze/slow timers around with it.
+      this.formation = null;
+    }
+    along = clamp(along, this.patrolLo, this.patrolHi);
+    // Pacer: standing still at an end. Still on its lane, still facing
+    // the way it's about to walk — the pause is the catch window.
+    if (this.patrolPauseT > 0) {
+      this.patrolPauseT -= dt;
+      this.vx = this.vy = 0;
+      return;
+    }
+    const sp = this.effectiveSpeed; // slow/Time Stop/events still apply
+    along += this.patrolDir * sp * dt;
+    let atEnd = false;
+    if (along >= this.patrolHi) {
+      along = this.patrolHi;
+      atEnd = true;
+    } else if (along <= this.patrolLo) {
+      along = this.patrolLo;
+      atEnd = true;
+    } else if (this.type.patrolBounce && this.decorAhead(along)) {
+      atEnd = true;
+    }
+    if (h) {
+      this.x = along;
+      this.y = this.patrolLine;
+    } else {
+      this.y = along;
+      this.x = this.patrolLine;
+    }
+    if (atEnd) {
+      if (this.type.patrolTurn) this.turnCorner();
+      else this.patrolDir = -this.patrolDir;
+      if (this.type.patrolPause) this.patrolPauseT = cfg.pauseDuration;
+    }
+    const nh = this.patrolAxis === "h";
+    this.vx = nh ? this.patrolDir * sp : 0;
+    this.vy = nh ? 0 : this.patrolDir * sp;
+  }
+  // Turner: a clockwise 90deg turn at each end instead of reversing, so
+  // four legs make a square. In screen space (y down) clockwise is
+  // +x -> +y -> -x -> -y. The new leg starts exactly at the corner.
+  turnCorner() {
+    const wasH = this.patrolAxis === "h";
+    const newDir = wasH ? this.patrolDir : -this.patrolDir;
+    this.patrolAxis = wasH ? "v" : "h";
+    this.patrolDir = newDir;
+    this.patrolLine = wasH ? this.x : this.y;
+    const along = wasH ? this.y : this.x;
+    this.setPatrolRange(newDir > 0 ? along : along - this.legLength);
+    // Game.checkHugs() reads this for the "hug a Turner at its corner"
+    // window (achievements are a later pass).
+    this.cornerAt = performance.now();
+  }
+  // Bouncer: is an unbroken rock/crystal right in front, on its lane?
+  // Only decor AHEAD counts, so once it has turned away it can't flip
+  // straight back. NOTE: decor is cosmetic and generated per client
+  // (never synced), so in co-op a joiner may see it turn at nothing.
+  decorAhead(along) {
+    const cfg = CONFIG.nasser;
+    const decor = Game.decor;
+    if (!decor) return false;
+    const h = this.patrolAxis === "h";
+    const reach = this.radius + cfg.bouncerDecorRadius;
+    for (let i = 0; i < decor.length; i++) {
+      const d = decor[i];
+      if (d.broken || cfg.bouncerDecorKinds.indexOf(d.kind) < 0) continue;
+      const dp = h ? d.y : d.x;
+      if (Math.abs(dp - this.patrolLine) > reach) continue;
+      const ahead = ((h ? d.x : d.y) - along) * this.patrolDir;
+      if (ahead > 0 && ahead < reach) return true;
+    }
+    return false;
+  }
+  // The route hint: a dotted line along the leg with end-markers, drawn
+  // under every sprite so the player can read the whole patrol at a glance
+  // and plan an intercept. Fades with distance from the local player so a
+  // full arena doesn't turn into a mess of lines. Pixel squares, not
+  // setLineDash — keeps it in the pixel-art style.
+  drawPatrolHint(ctx, cam, player) {
+    if (!this.patrolKnown || !this.alive) return;
+    const cfg = CONFIG.nasser;
+    const h = this.patrolAxis === "h";
+    // Drawn at FOOT level, so the dots read as a path on the ground.
+    const foot = this.radius * 0.85;
+    const x0 = h ? this.patrolLo : this.patrolLine,
+      y0 = (h ? this.patrolLine : this.patrolLo) + foot,
+      x1 = h ? this.patrolHi : this.patrolLine,
+      y1 = (h ? this.patrolLine : this.patrolHi) + foot;
+    // cull off-screen legs
+    if (
+      Math.max(x0, x1) < cam.x - 20 || Math.min(x0, x1) > cam.x + cam.w + 20 ||
+      Math.max(y0, y1) < cam.y - 20 || Math.min(y0, y1) > cam.y + cam.h + 20
+    )
+      return;
+    // distance from the player to the nearest point on the leg
+    const nx = clamp(player.x, Math.min(x0, x1), Math.max(x0, x1));
+    const ny = clamp(player.y, Math.min(y0, y1), Math.max(y0, y1));
+    const d = dist(player.x, player.y, nx, ny);
+    const fade =
+      1 - clamp((d - cfg.pathHintFadeStart) / (cfg.pathHintFadeEnd - cfg.pathHintFadeStart), 0, 1);
+    // 4 stepped opacity levels rather than a smooth fade (pixel-art rule)
+    const alpha = cfg.pathHintOpacity * Math.ceil(fade * 4) / 4;
+    if (alpha <= 0.01) return;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = cfg.pathHintColor;
+    const ds = cfg.pathHintDotSize,
+      sp = cfg.pathHintDotSpacing;
+    const len = this.patrolHi - this.patrolLo;
+    // Dots march in the current walk direction — shows which way it's
+    // heading without needing to look at the sprite.
+    const scroll = ((performance.now() / 1000) * cfg.pathHintScrollSpeed * this.patrolDir) % sp;
+    const ox = x0 - cam.x,
+      oy = y0 - cam.y;
+    for (let t = ((scroll % sp) + sp) % sp; t <= len; t += sp) {
+      const px = Math.round(h ? ox + t : ox) - (ds >> 1);
+      const py = Math.round(h ? oy : oy + t) - (ds >> 1);
+      ctx.fillRect(px, py, ds, ds);
+    }
+    // end-markers: short perpendicular bars
+    const bar = 10;
+    for (const e of [0, len]) {
+      const ex = Math.round(h ? ox + e : ox),
+        ey = Math.round(h ? oy : oy + e);
+      if (h) ctx.fillRect(ex - 1, ey - bar / 2, 3, bar);
+      else ctx.fillRect(ex - bar / 2, ey - 1, bar, 3);
+    }
+    ctx.restore();
+  }
   // Co-op, non-host clients only: the host runs the real AI via update()
   // above and periodically broadcasts {id, t, x, y} snapshots (see
   // Game.mpApplyBayatSnapshot); everyone else just visually lerps this
@@ -623,6 +832,21 @@ class Bayat {
     const buf = this.netBuf;
     if (!buf || buf.length === 0) return;
     const renderAt = performance.now() - Game.mpInterpDelay();
+    if (this.type.patrolType) {
+      // Puppets don't simulate the patrol (the host owns the position —
+      // see CLAUDE.md "Nassers" for why syncing the route and simulating
+      // locally would silently diverge). Walk direction is only for the
+      // sprite flip + hint scroll, so derive it from observed motion.
+      const px = this.x,
+        py = this.y;
+      this.puppetInterp(buf, renderAt);
+      const dAlong = this.patrolAxis === "h" ? this.x - px : this.y - py;
+      if (Math.abs(dAlong) > 0.05) this.patrolDir = dAlong > 0 ? 1 : -1;
+      return;
+    }
+    this.puppetInterp(buf, renderAt);
+  }
+  puppetInterp(buf, renderAt) {
 
     // Newer than the whole buffer (packets stalled): hold at the newest
     // known position rather than inventing motion.
@@ -737,15 +961,26 @@ class Bayat {
     // that it can't be hugged right now — see update()'s ghostType branch.
     const ghostAlpha =
       this.type.ghostType && this.ghostPhased ? 0.28 : 1;
-    if (Sprites.bayatLoaded) {
+    // Nassers draw from their OWN sprite (never the Bayat one — they're a
+    // separate character), squashed SHORT with the feet kept where a
+    // Bayat's would be. If nasser.png fails to load they take the
+    // procedural fallback below, like any other sprite.
+    const patrol = this.type.patrolType;
+    const imgKey = patrol && this.type.spriteKey ? this.type.spriteKey : "bayat";
+    if (Sprites[imgKey + "Loaded"]) {
       ctx.save();
       ctx.globalAlpha = ghostAlpha;
       const size = this.radius * 2.9;
+      const w = patrol ? size * CONFIG.nasser.spriteWidthMult : size;
+      const h = patrol ? size * CONFIG.nasser.spriteHeightMult : size;
+      // face the walk direction (horizontal lanes only — a vertical
+      // walker keeps whatever way it last faced)
+      if (patrol && this.patrolAxis === "h" && this.patrolDir < 0) ctx.scale(-1, 1);
       ctx.imageSmoothingEnabled = false;
       if (this.type.glow) {
         ctx.shadowColor = "#ffd76a";
         ctx.shadowBlur = 26;
-      } else if (this.type.danger) {
+      } else if (this.type.danger || this.type.bulldozer) {
         ctx.shadowColor = "rgba(255,60,80,.55)";
         ctx.shadowBlur = 12;
       } else if (bombBlink) {
@@ -756,17 +991,20 @@ class Bayat {
       // (and partially-transparent edge pixels) are left exactly as they were.
       const tinted =
         this.frozenT > 0
-          ? SpriteTint.getTinted("bayat", "#9adfff", 0.55)
+          ? SpriteTint.getTinted(imgKey, "#9adfff", 0.55)
           : SpriteTint.getTinted(
-              "bayat",
+              imgKey,
               tintColorOverride,
               tintStrengthOverride,
             );
-      ctx.drawImage(tinted || Sprites.bayat, -size / 2, -size / 2, size, size);
+      // bottom edge at +size/2 either way, so a short sprite stands on
+      // the same ground line instead of hovering at mid-height
+      ctx.drawImage(tinted || Sprites[imgKey], -w / 2, size / 2 - h, w, h);
       ctx.shadowBlur = 0;
       ctx.restore();
     } else {
       // ---- procedural fallback (used if bayat.png fails to load) ----
+      if (patrol) ctx.scale(1, CONFIG.nasser.spriteHeightMult);
       if (this.type.glow) {
         ctx.shadowColor = "#ffd76a";
         ctx.shadowBlur = 22;
@@ -902,10 +1140,12 @@ class BayatManager {
   constructor() {
     this.list = [];
     this.spawnTimer = 0;
+    this.nasserTimer = CONFIG.nasser.firstSpawnDelay;
   }
   reset() {
     this.list = [];
     this.spawnTimer = 0;
+    this.nasserTimer = CONFIG.nasser.firstSpawnDelay;
   }
   difficulty(elapsed) {
     return clamp(elapsed / CONFIG.spawn.rampDuration, 0, 1);
@@ -922,6 +1162,8 @@ class BayatManager {
       // run is networked", not a third Game.mode value; see CLAUDE.md
       // "Multiplayer" section.
       if (t.medkitType && !Game.coop) continue;
+      // Nassers have their own pool + spawn timer — see pickNasserType().
+      if (t.patrolType) continue;
       let w = t.weightBase;
       // Golden Minute / Chaos Mode events (goldenWeightMult) heavily
       // favor Golden and Diamond spawns while active.
@@ -940,8 +1182,25 @@ class BayatManager {
     }
     return weightedPick(pool);
   }
+  // The Nasser spawn pool: same weight/minDiff shape as pickType(), but
+  // only over patrolType entries. `anyDiff` (test hotkey) ignores minDiff.
+  pickNasserType(diff, anyDiff) {
+    const pool = [];
+    for (const key in BAYAT_TYPES) {
+      const t = BAYAT_TYPES[key];
+      if (!t.patrolType || (!anyDiff && diff < t.minDiff)) continue;
+      pool.push({ item: t, weight: t.weightBase });
+    }
+    return pool.length ? weightedPick(pool) : null;
+  }
+  countPatrol() {
+    let c = 0;
+    for (const n of this.list) if (n.alive && n.type.patrolType) c++;
+    return c;
+  }
   spawnOne(player, diff, luck) {
     const type = this.pickType(diff, luck);
+    if (type.patrolType) return this.spawnPatrol(type, player, diff);
     let x,
       y,
       tries = 0;
@@ -958,6 +1217,88 @@ class BayatManager {
     else if (type.diamondType) Game.onDiamondEvent();
     else if (type.miniBoss) Game.onMiniBossEvent(type);
     return n;
+  }
+  /* Nassers don't spawn at a random ring point like Bayats — they spawn
+     at a lane START, with the whole leg validated: inside the arena
+     (Bayat.setPatrolRange shifts it in), grid-snapped so several Nassers
+     form deliberate-looking lanes, and never crossing the player's
+     current position. `ringMin/ringMax` default to CONFIG; the test
+     hotkey passes a closer ring so you can watch one immediately. */
+  spawnPatrol(type, player, diff, ringMin, ringMax) {
+    const cfg = CONFIG.nasser;
+    const g = cfg.laneGrid;
+    // Line: a row of marchers side by side on parallel lanes, same leg,
+    // same phase. They share a `formation` object so CC on one (a Gem of
+    // Time catching the edge of the row) holds the whole row in formation
+    // — see syncFormations().
+    const count = type.formation ? randInt(cfg.lineCountMin, cfg.lineCountMax) : 1;
+    const members = [];
+    for (let i = 0; i < count; i++) members.push(new Bayat(type, player.x, player.y, diff));
+    const lead = members[0];
+    let axis = "h",
+      dir = 1;
+    for (let tries = 0; tries < 12; tries++) {
+      const ang = Math.random() * TAU;
+      const r = rand(ringMin || cfg.spawnRingMin, ringMax || cfg.spawnRingMax);
+      lead.x = Math.round((player.x + Math.cos(ang) * r) / g) * g;
+      lead.y = Math.round((player.y + Math.sin(ang) * r) / g) * g;
+      axis = Math.random() < 0.5 ? "h" : "v";
+      dir = Math.random() < 0.5 ? 1 : -1;
+      // Every member's lane must clear the player, not just the lead's.
+      let clear = true;
+      for (let i = 0; i < count && clear; i++) {
+        const n = members[i];
+        n.x = lead.x + (axis === "h" ? 0 : i * cfg.lineSpacing);
+        n.y = lead.y + (axis === "h" ? i * cfg.lineSpacing : 0);
+        n.initPatrol(axis, dir);
+        const h = n.patrolAxis === "h";
+        const along = clamp(h ? player.x : player.y, n.patrolLo, n.patrolHi);
+        const lx = h ? along : n.patrolLine,
+          ly = h ? n.patrolLine : along;
+        if (dist(player.x, player.y, lx, ly) < cfg.playerClearance) clear = false;
+      }
+      if (clear) break;
+    }
+    const formation = count > 1 ? { members } : null;
+    for (const n of members) {
+      n.formation = formation;
+      n.patrolVer = 1;
+      this.list.push(n);
+    }
+    if (type.miniBoss) Game.onMiniBossEvent(type);
+    return lead;
+  }
+  // Hold every Line in formation: any freeze/stun/slow/pause on one
+  // member is applied to all of them, so the row stops and restarts
+  // together instead of shearing apart. Runs before the per-Bayat update
+  // (host/solo only — joiners just render positions). Scratch fields on
+  // the shared formation object, stamped per frame, so nothing allocates.
+  syncFormations() {
+    const frame = (this._formFrame = (this._formFrame || 0) + 1);
+    for (const n of this.list) {
+      const f = n.formation;
+      if (!f || !n.alive) continue;
+      if (f._frame !== frame) {
+        f._frame = frame;
+        f.fz = f.st = f.sl = f.pz = 0;
+      }
+      f.fz = Math.max(f.fz, n.frozenT);
+      f.st = Math.max(f.st, n.stunT);
+      f.sl = Math.max(f.sl, n.slowT);
+      f.pz = Math.max(f.pz, n.patrolPauseT);
+    }
+    for (const n of this.list) {
+      const f = n.formation;
+      if (!f || !n.alive || f._frame !== frame) continue;
+      n.frozenT = f.fz;
+      n.stunT = f.st;
+      n.slowT = f.sl;
+      n.patrolPauseT = f.pz;
+    }
+  }
+  drawPatrolHints(ctx, cam, player) {
+    if (!CONFIG.nasser.showPathHint) return;
+    for (const n of this.list) if (n.type.patrolType) n.drawPatrolHint(ctx, cam, player);
   }
   // `extraSpawnAnchors` (co-op host only — see CLAUDE.md "Multiplayer"):
   // remote peers' puppet positions (Game.mpPeers), so new Bayats populate
@@ -1000,6 +1341,23 @@ class BayatManager {
       this.spawnOne(anchor, diff, player.totalLuck);
       this.spawnTimer = interval;
     }
+    // Nassers: their own spawn speed (CONFIG.nasser.spawnInterval), eased
+    // toward spawnIntervalMin with difficulty and sped up by the same
+    // Hyper Mode / event multiplier as Bayats.
+    const nc = CONFIG.nasser;
+    this.nasserTimer -= dt;
+    if (this.nasserTimer <= 0) {
+      this.nasserTimer = lerp(nc.spawnInterval, nc.spawnIntervalMin, diff) / speedMult;
+      if (this.countPatrol() < nc.maxAlive) {
+        const t = this.pickNasserType(diff);
+        const anchor =
+          extraSpawnAnchors && extraSpawnAnchors.length && Math.random() < 0.5
+            ? choice(extraSpawnAnchors)
+            : player;
+        if (t) this.spawnPatrol(t, anchor, diff);
+      }
+    }
+    this.syncFormations();
     for (let i = this.list.length - 1; i >= 0; i--) {
       const n = this.list[i];
       if (!n.alive) {
@@ -1042,7 +1400,7 @@ class BayatManager {
   // host no longer lists (it died — a hugResult already handled the
   // death fx locally, this is just cleanup for ids we somehow missed,
   // e.g. this client joined mid-run and never saw the original spawn).
-  applySnapshot(flat, intro, difficulty, sampleT) {
+  applySnapshot(flat, intro, difficulty, sampleT, patrols) {
     /* sampleT is the host's send time mapped onto our clock
        (Game.mpSampleTime). Buffering by that instead of by arrival time
        is what makes remote motion smooth: the host emits snapshots at a
@@ -1088,6 +1446,9 @@ class BayatManager {
         if (!type) continue; // unknown type key — ignore rather than throw
         n = new Bayat(type, s.x, s.y, difficulty || 0);
         n.id = s.id;
+        // the constructor's default lane is a guess — hide the hint until
+        // the host's real lane arrives (normally in this same message)
+        if (type.patrolType) n.patrolKnown = false;
         this.list.push(n);
       }
       /* Push into the interpolation buffer that updatePuppet() reads.
@@ -1105,6 +1466,20 @@ class BayatManager {
     }
     for (let i = this.list.length - 1; i >= 0; i--) {
       if (!seen.has(this.list[i].id)) this.list.splice(i, 1);
+    }
+    /* Nasser lanes: [id, axis(0=h,1=v), lo, hi, line, ...]. DISPLAY ONLY —
+       drives the path hint. The puppet's position still comes purely from
+       the snapshot stream above; nothing simulates the patrol here. */
+    if (Array.isArray(patrols)) {
+      for (let i = 0; i + 4 < patrols.length; i += 5) {
+        const n = this.list.find((b) => b.id === patrols[i]);
+        if (!n || !n.type.patrolType) continue;
+        n.patrolAxis = patrols[i + 1] ? "v" : "h";
+        n.patrolLo = patrols[i + 2];
+        n.patrolHi = patrols[i + 3];
+        n.patrolLine = patrols[i + 4];
+        n.patrolKnown = true;
+      }
     }
   }
   nearest(x, y, filterFn) {

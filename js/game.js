@@ -185,6 +185,28 @@ const Game = {
       if (k === "j" && this.state === "playing" && this.jumpscareT <= 0) {
         this.triggerJumpscare(e.shiftKey ? true : undefined);
       }
+      // Test hotkey: K spawns a Nasser close by so the patrol/intercept
+      // feel can be tuned without waiting for the spawn roll. Host/solo
+      // only — a joiner's Bayats belong to the host.
+      if (
+        k === "k" &&
+        this.state === "playing" &&
+        (!this.coop || Multiplayer.isHost)
+      ) {
+        // Cycles through every Nasser type in order (ignoring minDiff),
+        // so each variant can be checked on demand.
+        const keys = Object.keys(BAYAT_TYPES).filter((key) => BAYAT_TYPES[key].patrolType);
+        this._nasserTestIdx = ((this._nasserTestIdx ?? -1) + 1) % keys.length;
+        const testType = BAYAT_TYPES[keys[this._nasserTestIdx]];
+        UI.toast("Spawned: " + testType.label, 1200);
+        this.bayats.spawnPatrol(
+          testType,
+          this.player,
+          this.bayats.difficulty(this.elapsed),
+          220,
+          420,
+        );
+      }
       // Netcode diagnostics overlay (co-op only) — turns "it feels laggy"
       // into ping/jitter/snapshot numbers. See UI.renderNetStats().
       if (k === "n" && this.coop) {
@@ -774,13 +796,18 @@ const Game = {
            blind to Bayats it never saw spawn. Clearing the set on each
            keyframe also stops it growing for the whole run. */
         if (!this._mpTypesSent) this._mpTypesSent = new Set();
+        // Nasser lane versions already sent (id -> patrolVer), same
+        // keyframe self-healing as types. See `pl` below.
+        if (!this._mpPatrolSent) this._mpPatrolSent = new Map();
         const keyframe = netNow >= (this._mpNextKeyframe || 0);
         if (keyframe) {
           this._mpTypesSent.clear();
+          this._mpPatrolSent.clear();
           this._mpNextKeyframe = netNow + CONFIG.coop.snapshotKeyframeMs;
         }
         const l = [];
         const intro = [];
+        const pl = [];
         for (const n of this.bayats.list) {
           if (!n.alive) continue;
           let visible = false;
@@ -793,6 +820,21 @@ const Game = {
             this._mpTypesSent.add(n.id);
             intro.push(n.id, n.type.key);
           }
+          /* Nasser lanes, for the joiner's PATH HINT only — sent when first
+             seen and whenever a tool knocks it onto a new lane. Their
+             motion still rides the normal position stream: simulating the
+             patrol on both sides would diverge the moment a tool pushed
+             one. */
+          if (n.type.patrolType && this._mpPatrolSent.get(n.id) !== n.patrolVer) {
+            this._mpPatrolSent.set(n.id, n.patrolVer);
+            pl.push(
+              n.id,
+              n.patrolAxis === "v" ? 1 : 0,
+              Math.round(n.patrolLo),
+              Math.round(n.patrolHi),
+              Math.round(n.patrolLine),
+            );
+          }
         }
         const payload = {
           st: Math.round(performance.now()), // see playerState above
@@ -800,6 +842,7 @@ const Game = {
           d: this.bayats.difficulty(this.elapsed),
         };
         if (intro.length) payload.n = intro;
+        if (pl.length) payload.pl = pl;
         Multiplayer.send("bayatSnapshot", payload);
       }
     }
@@ -1046,7 +1089,7 @@ const Game = {
     if (!data) return;
     const t = this.mpSampleTime(peerId, data.st);
     if (data.l) {
-      this.bayats.applySnapshot(data.l, data.n, data.d, t);
+      this.bayats.applySnapshot(data.l, data.n, data.d, t, data.pl);
       return;
     }
     /* Legacy shape ({list:[{id,t,x,y}]}) — only reachable if a peer is
@@ -1321,6 +1364,7 @@ const Game = {
     this.slipsWatched = 0;
     this.achievementsThisRun = [];
     this.cursedItemsTaken = {};
+    this.nasserBumpsThisRun = 0; // head-on Nasser bumps — see nasserHeadOn()
     this.rollRunModifier();
     this.timer =
       mode === "arcade" ? CONFIG.arcade.duration : CONFIG.full.startTime;
@@ -2780,9 +2824,60 @@ const Game = {
       if (n.type.ghostType && n.ghostPhased) continue; // can't hug it mid-phase
       const rr = hr + n.radius * 0.6;
       if (dist2(this.player.x, this.player.y, n.x, n.y) <= rr * rr) {
+        if (n.type.patrolType && this.nasserHeadOn(n)) continue; // bumped, not hugged
         this.onHug(n, false);
       }
     }
+  },
+
+  /* The Goomba rule. Touching a Nasser from behind or the side is a hug;
+     walking into its FACE (inside CONFIG.nasser.frontArcDegrees of its
+     walk direction) bumps you back instead and it keeps walking. Basic
+     types: a nudge, no cost — a rhythm cue, not a punishment. Bulldozer:
+     costs time and shoves hard. Returns true when it bumped (so the
+     caller skips the hug). Works on co-op puppets too: patrolAxis/Dir are
+     known there (lane data + observed motion), and the bump only ever
+     moves the LOCAL player. */
+  nasserHeadOn(n) {
+    const cfg = CONFIG.nasser;
+    if (!cfg.headOnBump) return false;
+    const h = n.patrolAxis === "h";
+    const fx = h ? n.patrolDir : 0,
+      fy = h ? 0 : n.patrolDir;
+    const dx = this.player.x - n.x,
+      dy = this.player.y - n.y;
+    const d = Math.sqrt(dx * dx + dy * dy) || 0.001;
+    const cosHalf = Math.cos(((cfg.frontArcDegrees / 2) * Math.PI) / 180);
+    if ((dx * fx + dy * fy) / d < cosHalf) return false; // behind / side: hug
+    // Still in front but already bumped this contact: no hug either, or a
+    // head-on approach would bounce once and then hug on the next frame.
+    if ((n.bumpUntil || 0) > this.elapsed) return true;
+    n.bumpUntil = this.elapsed + cfg.bumpCooldown;
+    const bull = n.type.bulldozer;
+    const kb = bull ? cfg.bulldozerKnockback : cfg.bumpKnockback;
+    this.player.lungeT = 0.2;
+    this.player.lungeVX = (dx / d) * kb;
+    this.player.lungeVY = (dy / d) * kb;
+    this.nasserBumpsThisRun++;
+    if (bull) {
+      const dealt =
+        cfg.bulldozerTimeLoss *
+        (this.player.thickSkinMult !== undefined ? this.player.thickSkinMult : 1);
+      this.timer = clamp(this.timer - dealt, 0, this.maxStoredTime);
+      this.player.hurtFlashT = 0.4;
+      this.camera.shake(9, 0.22);
+      this.particles.text(this.player.x, this.player.y - 40, "−" + dealt.toFixed(0) + "s", "#ff5c72", 20);
+      AudioSystem.danger();
+    } else {
+      this.particles.text(this.player.x, this.player.y - 36, "BONK", "#fff4c2", 14);
+      AudioSystem.slip();
+    }
+    this.particles.burst(n.x + fx * n.radius, n.y + fy * n.radius, bull ? "#ff5c72" : "#fff4c2", bull ? 16 : 8, {
+      maxSpeed: bull ? 200 : 110,
+      minLife: 0.2,
+      maxLife: 0.45,
+    });
+    return true;
   },
 
   applyStickyArms(dt) {
@@ -3374,6 +3469,9 @@ const Game = {
       ctx.restore();
     }
 
+    // Nasser route hints go down first — they're paths on the ground,
+    // under chests, pickups and every sprite.
+    if (this.bayats) this.bayats.drawPatrolHints(ctx, cam, this.player);
     if (this.chests) this.chests.draw(ctx, cam);
     for (const p of this.pickups) drawPickup(ctx, cam, p);
     if (this.bayats) this.bayats.draw(ctx, cam);
