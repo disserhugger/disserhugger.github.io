@@ -49,14 +49,20 @@ class UpgradeSystem {
   isMaxed(def) {
     return this.levelOf(def.id) >= def.maxLevel;
   }
+  // Can this be handed out right now? Every random pool (level-up cards,
+  // chests, pickups, jumpscare) goes through this — not maxed, and not a
+  // Hava item while Havas are switched off.
+  canOffer(def) {
+    return !this.isMaxed(def) && !(def.havaOnly && !Game.havasOn);
+  }
   rollChoices(n, includeTools) {
     const pool = [];
     for (const def of STAT_UPGRADES) {
-      if (!this.isMaxed(def)) pool.push(def);
+      if (this.canOffer(def)) pool.push(def);
     }
     if (includeTools) {
       for (const def of TOOL_DEFS) {
-        if (!this.isMaxed(def)) pool.push(def);
+        if (this.canOffer(def)) pool.push(def);
       }
     }
     const picks = [];

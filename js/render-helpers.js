@@ -504,71 +504,95 @@ function drawRemotePlayer(ctx, cam, puppet) {
    that's the one you need to run to with a medkit. Screen space, like
    the HUD. */
 function drawTeammateArrows(ctx, cam, peers) {
-  const c = CONFIG.coop;
-  if (!c.teammateArrows) return;
-  const cx = cam.w / 2,
-    cy = cam.h / 2;
+  if (!CONFIG.coop.teammateArrows) return;
   const blink = Math.floor(performance.now() / 260) % 2 === 0;
   for (const id in peers) {
     const p = peers[id];
-    const sx = p.x - cam.x,
-      sy = p.y - cam.y;
-    if (sx > -10 && sx < cam.w + 10 && sy > -10 && sy < cam.h + 10) continue; // on screen
-    const dx = sx - cx,
-      dy = sy - cy;
-    // Scale the direction until it touches the inset screen rectangle.
-    const halfW = cx - c.arrowEdgeInset;
-    const top = c.arrowTopInset,
-      bottom = c.arrowEdgeInset;
-    const k = Math.min(
-      Math.abs(halfW / (dx || 0.001)),
-      dy < 0 ? Math.abs((cy - top) / dy) : Math.abs((cy - bottom) / (dy || 0.001)),
+    drawEdgeArrow(
+      ctx, cam, p.x, p.y,
+      p.downed ? (blink ? "#ff5c72" : "#ffffff") : p.color || "#fff",
+      (p.downed ? "! " : "") + String(p.name || "?").slice(0, 10),
+      p.downed ? "#ff8a8a" : "#fff",
     );
-    const ax = cx + dx * k,
-      ay = cy + dy * k;
-    const ang = Math.atan2(dy, dx);
-    const col = p.downed ? (blink ? "#ff5c72" : "#ffffff") : p.color || "#fff";
-    ctx.save();
-    ctx.translate(Math.round(ax), Math.round(ay));
-    ctx.save();
-    ctx.rotate(ang);
-    ctx.beginPath();
-    ctx.moveTo(12, 0);
-    ctx.lineTo(-7, -9);
-    ctx.lineTo(-3, 0);
-    ctx.lineTo(-7, 9);
-    ctx.closePath();
-    ctx.fillStyle = col;
-    ctx.strokeStyle = "rgba(0,0,0,.75)";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    ctx.fill();
-    ctx.restore();
-    // Label anchored on the side AWAY from the edge the arrow is pinned
-    // to, so it never runs off-screen or over its own arrow.
-    const ca = Math.cos(ang),
-      sa = Math.sin(ang);
-    let lx = 0,
-      ly = 0;
-    if (ca > 0.5) {
-      ctx.textAlign = "right";
-      lx = -16;
-    } else if (ca < -0.5) {
-      ctx.textAlign = "left";
-      lx = 16;
-    } else {
-      ctx.textAlign = "center";
-      ly = sa > 0 ? -18 : 20;
-    }
-    const meters = Math.round(Math.hypot(dx, dy) / 24); // ~24px per metre, the Nasser leg scale
-    const label = (p.downed ? "! " : "") + String(p.name || "?").slice(0, 10) + " " + meters + "m";
-    ctx.font = "bold 10px Consolas, 'Courier New', monospace";
-    ctx.fillStyle = "rgba(0,0,0,.7)";
-    ctx.fillText(label, lx + 1, ly + 4);
-    ctx.fillStyle = p.downed ? "#ff8a8a" : "#fff";
-    ctx.fillText(label, lx, ly + 3);
-    ctx.restore();
   }
+}
+/* Escaping Havas get the same edge arrow — they're heading OFF the
+   screen by design, and a capture you can't find isn't a capture. */
+function drawHavaArrows(ctx, cam, list) {
+  const blink = Math.floor(performance.now() / 250) % 2 === 0;
+  for (const n of list) {
+    if (!n.alive || !n.type.havaType || n.havaState !== "leaving") continue;
+    drawEdgeArrow(
+      ctx, cam, n.x, n.y,
+      blink ? "#ffd166" : "#9e6ed6",
+      "HAVA +" + Math.round(CONFIG.hava.baseExp + (n.bankExp || 0)),
+      "#ffd166",
+    );
+  }
+}
+/* One off-screen pointer: an arrow pinned to the inset screen edge on the
+   line from the screen centre toward (wx, wy), with a label + distance.
+   Returns without drawing if the point is on screen. Screen space. */
+function drawEdgeArrow(ctx, cam, wx, wy, color, labelText, labelColor) {
+  const c = CONFIG.coop;
+  const cx = cam.w / 2,
+    cy = cam.h / 2;
+  const sx = wx - cam.x,
+    sy = wy - cam.y;
+  if (sx > -10 && sx < cam.w + 10 && sy > -10 && sy < cam.h + 10) return; // on screen
+  const dx = sx - cx,
+    dy = sy - cy;
+  // Scale the direction until it touches the inset screen rectangle.
+  const halfW = cx - c.arrowEdgeInset;
+  const top = c.arrowTopInset,
+    bottom = c.arrowEdgeInset;
+  const k = Math.min(
+    Math.abs(halfW / (dx || 0.001)),
+    dy < 0 ? Math.abs((cy - top) / dy) : Math.abs((cy - bottom) / (dy || 0.001)),
+  );
+  const ax = cx + dx * k,
+    ay = cy + dy * k;
+  const ang = Math.atan2(dy, dx);
+  ctx.save();
+  ctx.translate(Math.round(ax), Math.round(ay));
+  ctx.save();
+  ctx.rotate(ang);
+  ctx.beginPath();
+  ctx.moveTo(12, 0);
+  ctx.lineTo(-7, -9);
+  ctx.lineTo(-3, 0);
+  ctx.lineTo(-7, 9);
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.strokeStyle = "rgba(0,0,0,.75)";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.fill();
+  ctx.restore();
+  // Label anchored on the side AWAY from the edge the arrow is pinned
+  // to, so it never runs off-screen or over its own arrow.
+  const ca = Math.cos(ang),
+    sa = Math.sin(ang);
+  let lx = 0,
+    ly = 0;
+  if (ca > 0.5) {
+    ctx.textAlign = "right";
+    lx = -16;
+  } else if (ca < -0.5) {
+    ctx.textAlign = "left";
+    lx = 16;
+  } else {
+    ctx.textAlign = "center";
+    ly = sa > 0 ? -18 : 20;
+  }
+  const meters = Math.round(Math.hypot(dx, dy) / 24); // ~24px per metre, the Nasser leg scale
+  const label = labelText + " " + meters + "m";
+  ctx.font = "bold 10px Consolas, 'Courier New', monospace";
+  ctx.fillStyle = "rgba(0,0,0,.7)";
+  ctx.fillText(label, lx + 1, ly + 4);
+  ctx.fillStyle = labelColor || "#fff";
+  ctx.fillText(label, lx, ly + 3);
+  ctx.restore();
 }
 
 /* =========================================================

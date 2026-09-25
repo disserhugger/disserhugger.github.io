@@ -17,6 +17,8 @@ const Sprites = {
   jumpscare: null,
   nasser: null,
   nasserLoaded: false,
+  hava: null,
+  havaLoaded: false,
   playerLoaded: false,
   bayatLoaded: false,
   buddyLoaded: false,
@@ -38,6 +40,7 @@ loadSprite("bayat", ASSETS.bayat);
 loadSprite("buddy", ASSETS.buddy);
 loadSprite("jumpscare", ASSETS.jumpscare);
 loadSprite("nasser", ASSETS.nasser);
+loadSprite("hava", ASSETS.hava);
 
 /* =========================================================
    OPTIONAL MEDIA (video / audio) — same graceful-degradation contract as

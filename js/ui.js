@@ -203,6 +203,18 @@ const UI = {
     }
   },
   updateHud(state) {
+    // Hava prison counter: appears the first time a Hava shows up in the
+    // run and stays for the rest of it. Only touches the DOM on change.
+    const showPrison = !!state.prisonVisible;
+    if (showPrison !== this._prisonShown) {
+      this._prisonShown = showPrison;
+      for (const el of document.querySelectorAll(".hud-prison-part")) el.classList.toggle("hidden", !showPrison);
+    }
+    if (showPrison && state.prison !== this._lastPrison) {
+      this._lastPrison = state.prison;
+      const el = document.getElementById("hud-prison");
+      if (el) el.textContent = state.prison;
+    }
     this.els["hud-timer"].textContent = fmtTime(Math.max(0, state.timer));
     this.els["hud-timer"].classList.toggle(
       "danger",
@@ -654,6 +666,12 @@ const UI = {
       rows.push(["Level Reached", stats.level]);
       rows.push(["Best Time", fmtTime(SaveSystem.getFullBest()) + "s"]);
     }
+    // The Hava prison (see Game.onHavaCaptured)
+    if (stats.havasImprisoned || stats.havasEscaped) {
+      rows.push(["Havas Imprisoned", stats.havasImprisoned + (stats.havaPrisonExp ? "  (+" + Math.round(stats.havaPrisonExp) + " EXP)" : "")]);
+      if (stats.havasEscaped) rows.push(["Havas Escaped", stats.havasEscaped]);
+    }
+    if (stats.prisonLifetime) rows.push(["Prison (all time)", stats.prisonLifetime + " Havas"]);
     if (stats.hyperMode) rows.push(["Hyper Hug Mode", "★ Reached!"]);
     if (stats.events && stats.events.length)
       rows.push(["Events Triggered", stats.events.length]);

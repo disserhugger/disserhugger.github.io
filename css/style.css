@@ -725,6 +725,12 @@ input[type="range"] {
   align-items: center;
   gap: 10px;
 }
+.hud-value.prison {
+  color: #c9b3ff;
+}
+.hud-prison-part.hidden {
+  display: none;
+}
 .hud-stat {
   display: flex;
   flex-direction: column;

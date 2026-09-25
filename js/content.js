@@ -465,6 +465,38 @@ const BAYAT_TYPES = {
     slipChance: 0.02,
   },
 
+  /* ---- HAVA (see CLAUDE.md "Havas") ----
+     Lives in bayats.list like everything else (snapshots, CC, drawing and
+     co-op arbitration for free), but: `havaType` routes Bayat.update()
+     into updateHava(); `unhuggable` makes onHug()/checkHugs() refuse it;
+     `pullImmune` keeps every pull tool off it (Bayat.noPull). weightBase
+     0 + pickType()'s havaType filter keep it out of the normal spawn pool
+     — Havas come from their own timer (CONFIG.hava). */
+  hava: {
+    key: "hava",
+    label: "Hava",
+    havaType: true,
+    unhuggable: true,
+    pullImmune: true,
+    spriteKey: "hava",
+    speedMult: 0.8,
+    sizeMult: 2.2,
+    expMult: 0,
+    rewardMult: 0,
+    color: "#9e6ed6",
+    dark: "#56307f",
+    weightBase: 0,
+    minDiff: 0,
+    flee: false,
+    danger: false,
+    glow: false,
+    tintColor: null,
+    tintStrength: 0,
+    badge: "",
+    badgeColor: "#fff",
+    slipChance: 0,
+  },
+
   /* ---- NASSERS — the patrol family (see CLAUDE.md "Nassers") ----
      Not a new class: `patrolType` routes Bayat.update() into
      updatePatrol() instead of the steering-force chain, so a Nasser gets
@@ -1038,6 +1070,18 @@ const STAT_UPGRADES = [
     },
   },
   {
+    // Game.onHavaCaptured(): multiplies the whole prison payout
+    id: "wardenbadge",
+    name: "Warden's Badge",
+    havaOnly: true,
+    icon: "🛡️",
+    maxLevel: 4,
+    desc: (l) => `Imprisoned Havas pay out ${25 * l}% more EXP and time`,
+    apply: (p, l) => {
+      p.wardenMult = 1 + 0.25 * l;
+    },
+  },
+  {
     // Game.onChestOpened(): chance of one extra pick
     id: "treasurehunter",
     name: "Treasure Hunter",
@@ -1425,6 +1469,33 @@ const TOOL_DEFS = [
     range: (l) => CONFIG.beartrap.baseRadius + l * 15,
     telegraphTime: CONFIG.beartrap.fuseDuration,
   },
+  /* ---- Hava capture tools: the ONLY way to catch a Hava, and only while
+     it's LEAVING (CONFIG.hava.captureOnlyWhenLeaving). Both end in
+     Game.captureHava(), which goes through the same co-op arbitration
+     as a hug. ---- */
+  {
+    id: "havanet",
+    name: "Hava Net",
+    havaOnly: true, // never offered while Havas are off (Game.havasOn)
+    icon: "🥅",
+    maxLevel: 5,
+    baseCooldown: 4.5,
+    desc: (l) => `Throws a net at the nearest ESCAPING Hava in range and drags it to prison.`,
+    range: (l) => 280 + l * 45,
+  },
+  {
+    id: "havacage",
+    name: "Prison Cage",
+    havaOnly: true,
+    icon: "🔒",
+    maxLevel: 5,
+    baseCooldown: 6.0,
+    kind: "telegraph",
+    desc: (l) => `Drops a cage right in an escaping Hava's path — if it walks in, it's caught. Long range, but you have to predict.`,
+    range: (l) => 520 + l * 60,
+    cageRadius: (l) => 70 + l * 10,
+    telegraphTime: CONFIG.hava.cageFuse,
+  },
   {
     id: "treatbag",
     name: "Treat Bag",
@@ -1523,6 +1594,11 @@ const ICON_SPRITE = {
   ui_book: [6, 9],
   ui_gear: [7, 9],
   nasser: [0, 10],
+  // Havas
+  havanet: [1, 10],
+  havacage: [2, 10],
+  wardenbadge: [3, 10],
+  hava: [4, 10],
 };
 function iconHTML(id, sizePx, fallbackEmoji) {
   const cell = ICON_SPRITE[id];
@@ -2086,6 +2162,10 @@ const ACHIEVEMENTS = [
   { id: "nasser10", name: "Sneak Attack", desc: "Hug 10 Nassers in a run without a single head-on bump.", icon: "goombaboots" },
   { id: "grandnasser", name: "Grand Slam", desc: "Catch the Grand Nasser.", icon: "nasser" },
   { id: "turnercorner", name: "Corner Kick", desc: "Hug a Turner Nasser right as it turns a corner.", icon: "nasser" },
+  // Havas (see Game.onHavaCaptured)
+  { id: "havafirst", name: "Book 'Em", desc: "Send your first Hava to prison.", icon: "hava" },
+  { id: "prison10", name: "Warden", desc: "Imprison 10 Havas (across all runs).", icon: "havacage" },
+  { id: "fatcat", name: "Fat Cat", desc: "Capture a Hava carrying 500+ EXP in its belly.", icon: "hava" },
 ];
 
 /* =========================================================

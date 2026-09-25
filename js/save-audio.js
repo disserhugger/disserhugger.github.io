@@ -8,6 +8,7 @@ const SaveSystem = {
   KEY_FULL: "bayatHug_fullGameBestTime",
   KEY_SETTINGS: "bayatHug_settings",
   KEY_LIFETIME: "bayatHug_lifetimeHugs",
+  KEY_PRISON: "bayatHug_lifetimePrison", // Havas imprisoned, all runs
   KEY_MP_PROFILE: "bayatHug_mpProfile",
   KEY_ACHIEVEMENTS: "bayatHug_achievements",
   KEY_RELAY_URL: "bayatHug_relayUrl",
@@ -70,6 +71,14 @@ const SaveSystem = {
     this.safeSet(this.KEY_LIFETIME, String(total));
     return total;
   },
+  getLifetimePrison() {
+    return parseInt(this.safeGet(this.KEY_PRISON) || "0", 10) || 0;
+  },
+  addLifetimePrison(n) {
+    const total = this.getLifetimePrison() + (n || 0);
+    this.safeSet(this.KEY_PRISON, String(total));
+    return total;
+  },
   getSettings() {
     const isTouch =
       "ontouchstart" in window || (navigator.maxTouchPoints || 0) > 0;
@@ -84,6 +93,7 @@ const SaveSystem = {
             reducedParticles: false,
             badges: true,
             touchControls: isTouch,
+            havas: true,
           },
           JSON.parse(raw),
         );
@@ -95,6 +105,7 @@ const SaveSystem = {
       reducedParticles: false,
       badges: true,
       touchControls: isTouch,
+      havas: true,
     };
   },
   setSettings(s) {

@@ -39,6 +39,9 @@ const ASSETS = {
   // pixelated. Generated placeholder: gen_god.py. If it fails to load the
   // prize popup still shows, just without the portrait.
   god: "assets/god.png",
+  // Havas — the big hungry ones (see CLAUDE.md "Havas"). Placeholder from
+  // gen_hava.py; replace with any image, it's scaled to the Hava's size.
+  hava: "assets/hava.png",
   jumpscare: "assets/jumpscare.png", // the "Mr. Squeeze" mascot still-image
 
   // --- optional jumpscare media (set to null to disable either one) ---
@@ -145,6 +148,44 @@ const CONFIG = {
     pathHintDotSize: 3,
     pathHintScrollSpeed: 18, // px/s the dots march in the walk direction
     pathHintColor: "#fff4c2",
+  },
+
+  // ---- Havas (see CLAUDE.md "Havas") ----
+  // Big, un-huggable eaters. They hunt the Dangerous ones first (that's
+  // their purpose: cleaning up what you can't hug), then your Bayats and
+  // Dissers. Everything they eat is banked at bankMult x its value; when
+  // full (or out of time) they LEAVE for the arena edge, and a capture
+  // tool can catch them on the way out — paying you the whole bank and
+  // sending them to prison. Reach the edge and they escape with it.
+  hava: {
+    firstSpawnDelay: 4, // seconds into a run before the first Hava
+    spawnInterval: 2, // then every N seconds, easing down to...
+    spawnIntervalMin: 28, // ...this as difficulty ramps
+    maxAlive: 3,
+    spawnRingMin: 650, // px from the anchoring player
+    spawnRingMax: 950,
+    huntDuration: 30, // seconds of hunting before it heads home
+    stomachSize: 8, // ...or after this many meals, whichever first
+    huntRange: 900, // how far it looks for prey
+    dangerPriority: 400, // px head start given to Dangerous prey when choosing
+    leaveSpeedMult: 0.7, // it's full — slower on the way out
+    exitMargin: 40, // reaching this close to the wall = escaped
+    // --- the bank ---
+    baseExp: 200, // every Hava is worth this much on its own
+    baseTime: 10, // seconds (Full Game)
+    bankMult: 10, // eaten prey is banked at 4x its hug value
+    dangerPreyExpMult: 1.5, // Dangerous prey have no hug value, so they
+    dangerPreyTimeMult: 1.0, // bank as if they were worth this much
+    growPerMeal: 1.5, // px of radius per meal...
+    maxGrowthMult: 1.5, // ...up to this x its starting size
+    // --- capture ---
+    captureOnlyWhenLeaving: true, // capture TOOLS can only catch a LEAVING Hava
+    // Walking into a Hava captures it, like a hug — at ANY time by default,
+    // so it's your call: grab it early (small bank) or let it feed first
+    // and risk it escaping. true = touch only works while it's leaving too.
+    touchCaptureOnlyWhenLeaving: false,
+    netFlightTime: 0.25, // Hava Net: seconds for the net to land
+    cageFuse: 0.9, // Prison Cage: seconds before the cage slams shut
   },
 
   // ---- performance (see CLAUDE.md "Performance") ----

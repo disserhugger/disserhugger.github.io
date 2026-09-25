@@ -54,6 +54,28 @@ const Game = {
   get hyperModeActive() {
     return this.hyperModeT > 0;
   },
+  /* Havas on/off (Settings). Solo reads the setting live, so switching it
+     off mid-run works. Co-op uses the HOST's choice for everyone (sent in
+     "start" as hv) — Havas are host-simulated, so a per-player setting
+     couldn't mean anything. null = no co-op value (older host): setting. */
+  mpHavasOn: null,
+  get havasOn() {
+    if (this.coop && this.mpHavasOn != null) return this.mpHavasOn;
+    return !this.settings || this.settings.havas !== false;
+  },
+  // Switched off mid-run: Havas already out just leave (no escape counted,
+  // nothing banked is lost to a counter). Solo / host only — a joiner's
+  // copies are puppets and the host's setting rules co-op anyway.
+  removeHavas() {
+    if (!this.bayats || (this.coop && !Multiplayer.isHost)) return;
+    for (let i = this.bayats.list.length - 1; i >= 0; i--) {
+      const n = this.bayats.list[i];
+      if (!n.type.havaType) continue;
+      n.alive = false;
+      this.particles.burst(n.x, n.y, "#9e6ed6", 16, { maxSpeed: 160, minLife: 0.3, maxLife: 0.6 });
+      this.bayats.list.splice(i, 1);
+    }
+  },
   // ---- Chaos Update: random events ----
   activeEvent: null, // {def, t, duration} or null
   eventTimer: 0, // countdown to the next roll attempt
@@ -442,6 +464,10 @@ const Game = {
     bindToggle("set-particles", "reducedParticles");
     bindToggle("set-badges", "badges");
     bindToggle("set-touch", "touchControls");
+    bindToggle("set-havas", "havas");
+    document.getElementById("set-havas").addEventListener("click", () => {
+      if (!this.havasOn) this.removeHavas();
+    });
     document.getElementById("set-volume").addEventListener("input", (e) => {
       this.settings.volume = parseInt(e.target.value, 10);
       AudioSystem.setVolume(this.settings.volume);
@@ -465,6 +491,9 @@ const Game = {
     document
       .getElementById("set-touch")
       .classList.toggle("on", this.settings.touchControls);
+    document
+      .getElementById("set-havas")
+      .classList.toggle("on", this.settings.havas !== false);
   },
 
   /* =========================================================
@@ -574,6 +603,7 @@ const Game = {
     Multiplayer.on("eventRequest", () => this.mpOnEventRequest());
     Multiplayer.on("decorBreak", (data) => this.mpOnDecorBreak(data));
     Multiplayer.on("fxZone", (data) => this.mpOnFxZone(data));
+    Multiplayer.on("havaEat", (data) => this.mpOnHavaEat(data));
     Multiplayer.on("playerState", (data, peerId) =>
       this.mpOnPlayerState(data, peerId),
     );
@@ -707,7 +737,9 @@ const Game = {
     const seed = (Math.random() * 2147483647) | 0;
     const mod = this.pickRunModifier();
     const modId = mod ? mod.id : null;
-    Multiplayer.send("start", { arenaId, seed, mod: modId });
+    // The host's Havas setting is the room's (see Game.havasOn).
+    this.mpHavasOn = this.settings.havas !== false;
+    Multiplayer.send("start", { arenaId, seed, mod: modId, hv: this.mpHavasOn ? 1 : 0 });
     this.mpBeginCoopRun(arenaId, seed, modId, null, null);
   },
   /* Accepted from the lobby (the normal start), AND from the results
@@ -720,6 +752,7 @@ const Game = {
     const onResults = this.coop && this.state === "gameover";
     if (!this.mpInLobby && !onResults) return;
     if (peerId) this.mpHostId = peerId;
+    this.mpHavasOn = data.hv == null ? null : !!data.hv;
     this.mpBeginCoopRun(data.arenaId, data.seed, data.mod, data.ev, data.br);
   },
   // True while this client is inside a live co-op run (paused and the
@@ -742,6 +775,7 @@ const Game = {
       mod: this.runModifier ? this.runModifier.id : null,
       ev: this.activeEvent ? { id: this.activeEvent.def.id, t: this.activeEvent.t } : null,
       br,
+      hv: this.havasOn ? 1 : 0,
     };
   },
   mpOnPeerJoin(peerId) {
@@ -1024,15 +1058,18 @@ const Game = {
         // Nasser lane versions already sent (id -> patrolVer), same
         // keyframe self-healing as types. See `pl` below.
         if (!this._mpPatrolSent) this._mpPatrolSent = new Map();
+        if (!this._mpHavaSent) this._mpHavaSent = new Map();
         const keyframe = netNow >= (this._mpNextKeyframe || 0);
         if (keyframe) {
           this._mpTypesSent.clear();
           this._mpPatrolSent.clear();
+          this._mpHavaSent.clear();
           this._mpNextKeyframe = netNow + CONFIG.coop.snapshotKeyframeMs;
         }
         const l = [];
         const intro = [];
         const pl = [];
+        const hv = [];
         for (const n of this.bayats.list) {
           if (!n.alive) continue;
           let visible = false;
@@ -1050,6 +1087,18 @@ const Game = {
              motion still rides the normal position stream: simulating the
              patrol on both sides would diverge the moment a tool pushed
              one. */
+          // Hava state (belly, leaving, size) — sent only when it changes.
+          if (n.type.havaType && this._mpHavaSent.get(n.id) !== n.havaVer) {
+            this._mpHavaSent.set(n.id, n.havaVer);
+            hv.push(
+              n.id,
+              n.havaState === "leaving" ? 1 : 0,
+              Math.round(n.bankExp),
+              Math.round(n.bankTime * 10),
+              Math.round(n.radius),
+              n.meals,
+            );
+          }
           if (n.type.patrolType && this._mpPatrolSent.get(n.id) !== n.patrolVer) {
             this._mpPatrolSent.set(n.id, n.patrolVer);
             pl.push(
@@ -1068,6 +1117,7 @@ const Game = {
         };
         if (intro.length) payload.n = intro;
         if (pl.length) payload.pl = pl;
+        if (hv.length) payload.hv = hv;
         Multiplayer.send("bayatSnapshot", payload);
       }
     }
@@ -1314,7 +1364,7 @@ const Game = {
     if (!data) return;
     const t = this.mpSampleTime(peerId, data.st);
     if (data.l) {
-      this.bayats.applySnapshot(data.l, data.n, data.d, t, data.pl);
+      this.bayats.applySnapshot(data.l, data.n, data.d, t, data.pl, data.hv);
       return;
     }
     /* Legacy shape ({list:[{id,t,x,y}]}) — only reachable if a peer is
@@ -1336,17 +1386,21 @@ const Game = {
   mpOnHugClaim(data, peerId) {
     if (!this.coop || !Multiplayer.isHost) return;
     const bayat = this.bayats.byId(data.bayatId);
-    const valid = !!(bayat && bayat.alive);
+    let valid = !!(bayat && bayat.alive);
+    // A Hava can only be claimed as a CAPTURE, and only while leaving —
+    // the host re-checks, since the joiner's view of its state can lag.
+    if (valid && bayat.type.havaType && bayat.havaState !== "leaving" && this.havaNeedsLeaving(!!data.touch)) {
+      valid = false;
+    }
     if (valid) {
       bayat.alive = false;
       const idx = this.bayats.list.indexOf(bayat);
       if (idx >= 0) this.bayats.list.splice(idx, 1);
     }
-    Multiplayer.send("hugResult", {
-      bayatId: data.bayatId,
-      winnerId: peerId,
-      valid,
-    });
+    const result = { bayatId: data.bayatId, winnerId: peerId, valid };
+    // The host owns the Hava's bank — hand it to the winner.
+    if (valid && bayat.type.havaType) result.bank = { e: bayat.bankExp || 0, t: bayat.bankTime || 0, m: bayat.meals || 0 };
+    Multiplayer.send("hugResult", result);
   },
   mpOnHugResult(data) {
     if (!this.coop) return;
@@ -1374,6 +1428,11 @@ const Game = {
     const bayat = typeof predicted === "object" ? predicted : inList;
     if (!bayat) return;
 
+    if (iWon && data.bank && bayat.type.havaType) {
+      bayat.bankExp = +data.bank.e || 0;
+      bayat.bankTime = +data.bank.t || 0;
+      bayat.meals = +data.bank.m || 0;
+    }
     if (iWon) {
       // Reward only — the visual pop already played at prediction time,
       // so don't double it.
@@ -1406,7 +1465,7 @@ const Game = {
   },
   // Called from onHug() instead of applyHugReward() directly whenever
   // this.coop is true — see CLAUDE.md "Multiplayer" protocol table.
-  mpRequestHug(bayat, isChainHug) {
+  mpRequestHug(bayat, isChainHug, extra) {
     if (Multiplayer.isHost) {
       // I AM the authority — resolve immediately, no round trip needed.
       if (!bayat.alive) return;
@@ -1425,7 +1484,7 @@ const Game = {
       // it from bayats.list, so mpOnHugResult couldn't otherwise find it
       // to award the reward against.
       this.mpPendingClaims[bayat.id] = bayat;
-      Multiplayer.send("hugClaim", { bayatId: bayat.id });
+      Multiplayer.send("hugClaim", extra ? { bayatId: bayat.id, ...extra } : { bayatId: bayat.id });
       /* ---- CLIENT-SIDE PREDICTION ----------------------------------
          Without this, a non-host's hug does nothing for a full round
          trip (measured ~230ms median on a Cloudflare relay, worse on a
@@ -1449,8 +1508,10 @@ const Game = {
       const idx = this.bayats.list.indexOf(bayat);
       if (idx >= 0) this.bayats.list.splice(idx, 1);
       this.mpPlayDeathFx(bayat);
-      this.player.triggerHug(bayat.x, bayat.y); // the lunge/squash feedback
-      AudioSystem.hug(this.combo);
+      if (!bayat.type.havaType) {
+        this.player.triggerHug(bayat.x, bayat.y); // the lunge/squash feedback
+        AudioSystem.hug(this.combo);
+      }
     }
   },
   // Timer hit 0 in co-op: go down instead of ending the run, as long as
@@ -1597,6 +1658,10 @@ const Game = {
     this.cursedItemsTaken = {};
     this.nasserBumpsThisRun = 0; // head-on Nasser bumps — see nasserHeadOn()
     this.nasserHugStreak = 0; // Nasser hugs since the last bump — see onNasserHug()
+    this.havasImprisoned = 0; // Havas captured this run (the prison)
+    this.havasEscaped = 0;
+    this.havaPrisonExp = 0; // total EXP the prison paid out this run
+    this.havaSeenThisRun = false; // shows the HUD prison counter
     this.rollRunModifier();
     this.timer =
       mode === "arcade" ? CONFIG.arcade.duration : CONFIG.full.startTime;
@@ -1677,6 +1742,7 @@ const Game = {
     this.mpHostId = null;
     this.mpWorldSeed = null;
     this.mpRunModifierId = undefined;
+    this.mpHavasOn = null;
   },
 
   timeRewardFactor() {
@@ -1953,6 +2019,9 @@ const Game = {
   // mpRequestHug() and CLAUDE.md "Multiplayer" section for the claim
   // protocol. Either way, the caller doesn't need to know which path ran.
   onHug(bayat, isChainHug) {
+    // Havas can't be hugged — only captured (captureHava). This is the one
+    // choke point every hug source goes through, so one guard covers them.
+    if (bayat.type.unhuggable) return;
     if (this.coop) {
       this.mpRequestHug(bayat, isChainHug);
       return;
@@ -1967,9 +2036,101 @@ const Game = {
   // `visualsAlreadyPlayed` is set when a co-op client predicted this hug
   // (see mpRequestHug): the death fx, lunge and sound already fired at
   // touch time, so replaying them ~200ms later would double up.
+  /* ---- Havas (see CLAUDE.md "Havas") ----
+     captureHava() is what the capture tools call. It routes through the
+     SAME arbitration as a hug (host resolves, joiners claim) so two
+     players can never both imprison one Hava — only onHug()'s
+     "unhuggable" guard is bypassed. Returns false if it can't be caught
+     right now (not leaving, already gone). */
+  captureHava(h, byTouch) {
+    if (!h || !h.alive || !h.type.havaType) return false;
+    if (h.havaState !== "leaving" && this.havaNeedsLeaving(byTouch)) return false;
+    if (this.coop) this.mpRequestHug(h, false, byTouch ? { touch: 1 } : null);
+    else this.applyHugReward(h, false);
+    return true;
+  },
+  // Touch and tools have separate rules (CONFIG.hava): by default a touch
+  // captures any time, tools only an escaping Hava.
+  havaNeedsLeaving(byTouch) {
+    const cfg = CONFIG.hava;
+    return byTouch ? cfg.touchCaptureOnlyWhenLeaving : cfg.captureOnlyWhenLeaving;
+  },
+  onHavaCaptured(h) {
+    const cfg = CONFIG.hava;
+    const mult = this.player.wardenMult || 1;
+    const bankExp = h.bankExp || 0;
+    const exp = (cfg.baseExp + bankExp) * this.player.totalExpMult * mult;
+    const time = (cfg.baseTime + (h.bankTime || 0)) * mult;
+    this.havasImprisoned++;
+    this.havaPrisonExp += exp;
+    const lifetime = SaveSystem.getLifetimePrison() + this.havasImprisoned;
+    this.checkAchievement("havafirst");
+    if (lifetime >= 10) this.checkAchievement("prison10");
+    if (bankExp >= 500) this.checkAchievement("fatcat");
+    // the payout
+    if (this.mode === "full") this.timer = clamp(this.timer + time, 0, this.maxStoredTime);
+    const lv = this.exp.add(exp);
+    if (lv.length) {
+      if (this.mode === "arcade") this.applyAutoLevel(lv.length);
+      else this.queueLevelUps(lv.length);
+    }
+    // the moment
+    AudioSystem.evolution();
+    this.freezeT = Math.max(this.freezeT, 0.1);
+    this.triggerFlash("#ffd166", 0.25);
+    this.camera.shake(10, 0.25);
+    this.shockwaves.push({ x: h.x, y: h.y, color: "#ffd166", t: 0, duration: 0.45, maxR: 120 });
+    this.particles.burst(h.x, h.y, "#9e6ed6", 40, { maxSpeed: 240, minLife: 0.4, maxLife: 0.8 });
+    this.particles.text(h.x, h.y - h.radius - 20, "CAPTURED!", "#ffd166", 22);
+    this.particles.text(h.x, h.y - h.radius + 2, "→ PRISON", "#c9b3ff", 13);
+    const label =
+      "Hava captured: +" + Math.round(exp) + " EXP" +
+      (this.mode === "full" ? " +" + time.toFixed(1) + "s" : "") +
+      (h.meals ? " (" + h.meals + " eaten)" : "");
+    if (CONFIG.god.onChest) UI.godPrize({ items: [{ id: "hava", name: label }] });
+    else UI.toast(label, 2600);
+  },
+  onHavaArrive(h) {
+    this.havaSeenThisRun = true;
+    UI.toast("A HAVA HAS ARRIVED — it eats Dangerous Bayats... and yours!", 3000);
+    AudioSystem.danger();
+  },
+  onHavaEat(h, prey) {
+    const bad = prey.type.danger || prey.type.pullImmune;
+    this.particles.burst(prey.x, prey.y, bad ? "#ff5c72" : prey.type.color || "#cdd6f4", 14, {
+      maxSpeed: 150, minLife: 0.25, maxLife: 0.55,
+    });
+    this.particles.text(prey.x, prey.y - 20, "CHOMP!", "#c9b3ff", 14);
+    AudioSystem.slip();
+    // Joiners only see the prey vanish from the snapshot — tell them why.
+    if (this.coop && Multiplayer.isHost) {
+      Multiplayer.send("havaEat", { x: Math.round(prey.x), y: Math.round(prey.y), bad: bad ? 1 : 0 });
+    }
+  },
+  mpOnHavaEat(data) {
+    if (!this.mpRunActive() || Multiplayer.isHost || !data) return;
+    this.particles.burst(+data.x, +data.y, data.bad ? "#ff5c72" : "#cdd6f4", 14, {
+      maxSpeed: 150, minLife: 0.25, maxLife: 0.55,
+    });
+    this.particles.text(+data.x, +data.y - 20, "CHOMP!", "#c9b3ff", 14);
+  },
+  onHavaLeaving(h) {
+    UI.toast("A Hava is ESCAPING with +" + Math.round(CONFIG.hava.baseExp + h.bankExp) + " EXP — catch it!", 2600);
+  },
+  onHavaEscaped(h) {
+    this.havasEscaped++;
+    UI.toast("A Hava escaped with +" + Math.round(CONFIG.hava.baseExp + h.bankExp) + " EXP...", 2200);
+  },
+
   applyHugReward(bayat, isChainHug, visualsAlreadyPlayed) {
     const type = bayat.type;
     bayat.alive = false;
+    // A Hava only ever arrives here via captureHava() — pay out the
+    // prison bank instead of treating it like a hug (no combo, no lunge).
+    if (type.havaType) {
+      this.onHavaCaptured(bayat);
+      return;
+    }
     if (!visualsAlreadyPlayed) {
       this.player.triggerHug(bayat.x, bayat.y);
       AudioSystem.hug(this.combo);
@@ -2652,7 +2813,7 @@ const Game = {
         this.particles.text(p.x, p.y - 20, "MYSTERY: bonus!", def.color, 14);
       } else if (roll < 0.6) {
         const pool = STAT_UPGRADES.concat(TOOL_DEFS).filter(
-          (d) => !this.upgrades.isMaxed(d),
+          (d) => this.upgrades.canOffer(d),
         );
         if (pool.length) {
           const pick = choice(pool);
@@ -2838,7 +2999,7 @@ const Game = {
       this.jumpscareOutcomeText = "Scared every Bayat away!";
     } else if (outcome === "randomitem") {
       const pool = STAT_UPGRADES.concat(TOOL_DEFS).filter(
-        (d) => !this.upgrades.isMaxed(d),
+        (d) => this.upgrades.canOffer(d),
       );
       if (pool.length) {
         const pick = choice(pool);
@@ -2856,7 +3017,7 @@ const Game = {
       this.jumpscareOutcomeText = "Triggered something...";
     } else if (outcome === "golden") {
       const pool = STAT_UPGRADES.concat(TOOL_DEFS).filter(
-        (d) => !this.upgrades.isMaxed(d),
+        (d) => this.upgrades.canOffer(d),
       );
       for (let i = 0; i < 3 && pool.length; i++) {
         const idx = randInt(0, pool.length - 1);
@@ -3042,7 +3203,7 @@ const Game = {
 
     for (let i = 0; i < picks; i++) {
       const pool = STAT_UPGRADES.concat(TOOL_DEFS).filter(
-        (d) => !this.upgrades.isMaxed(d),
+        (d) => this.upgrades.canOffer(d),
       );
       if (!pool.length) break;
       const pick = choice(pool);
@@ -3164,6 +3325,14 @@ const Game = {
     for (const n of this.bayats.list) {
       if (!n.alive) continue;
       if (n.type.ghostType && n.ghostPhased) continue; // can't hug it mid-phase
+      if (n.type.unhuggable) {
+        // Havas: walking into one CAPTURES it instead of hugging it.
+        const cr = hr + n.radius * 0.6;
+        if (n.type.havaType && dist2(this.player.x, this.player.y, n.x, n.y) <= cr * cr) {
+          this.captureHava(n, true);
+        }
+        continue;
+      }
       const rr = hr + n.radius * 0.6;
       if (dist2(this.player.x, this.player.y, n.x, n.y) <= rr * rr) {
         if (n.type.patrolType && this.nasserHeadOn(n)) continue; // bumped, not hugged
@@ -3434,6 +3603,13 @@ const Game = {
     this.jumpscareT = 0;
     this.stopJumpscareMedia();
     const lifetimeTotal = SaveSystem.addLifetimeHugs(this.hugs);
+    const prisonLifetime = SaveSystem.addLifetimePrison(this.havasImprisoned);
+    const havaStats = {
+      havasImprisoned: this.havasImprisoned,
+      havasEscaped: this.havasEscaped,
+      havaPrisonExp: this.havaPrisonExp,
+      prisonLifetime,
+    };
     if (ARENAS.every((a) => !a.unlock || lifetimeTotal >= a.unlock.value)) {
       this.checkAchievement("allarenas");
     }
@@ -3453,6 +3629,7 @@ const Game = {
           events: this.eventsTriggeredThisRun,
           achievements: this.achievementsThisRun,
           hyperMode: this.hyperModeHitThisRun,
+          ...havaStats,
         },
         isRecord,
       );
@@ -3471,6 +3648,7 @@ const Game = {
           events: this.eventsTriggeredThisRun,
           achievements: this.achievementsThisRun,
           hyperMode: this.hyperModeHitThisRun,
+          ...havaStats,
         },
         isRecord,
       );
@@ -3658,6 +3836,8 @@ const Game = {
       level: this.exp.level,
       expProgress: this.exp.progress,
       mode: this.mode,
+      prison: this.havasImprisoned,
+      prisonVisible: this.havaSeenThisRun || this.havasImprisoned > 0,
     });
     UI.updateActiveEventBanner(this.hyperModeActive, this.activeEvent);
     if (UI.netStatsVisible) UI.renderNetStats();
@@ -3968,6 +4148,7 @@ const Game = {
       for (const id in this.mpPeers) drawRemotePlayer(ctx, cam, this.mpPeers[id]);
       drawTeammateArrows(ctx, cam, this.mpPeers);
     }
+    if (this.bayats) drawHavaArrows(ctx, cam, this.bayats.list);
     if (this.player) this.player.draw(ctx, cam);
     if (this.tools) {
       for (const id in this.tools.active) {

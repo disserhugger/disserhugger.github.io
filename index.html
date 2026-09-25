@@ -114,6 +114,18 @@
           </ul>
           <h3>Nassers</h3>
           <p>
+            <b>Havas</b> are big and hungry, and you can't hug them. They
+            hunt the <b>Dangerous</b> ones first &mdash; cleaning up what you
+            can't touch &mdash; then eat your Bayats and Dissers, banking
+            <b>4&times;</b> the EXP and time of everything they eat. When
+            they're full they head for the edge of the arena: catch them
+            with a <b>Hava Net</b> or <b>Prison Cage</b> before they escape
+            and the whole bank is yours &mdash; or just <b>walk into one</b> to
+            capture it any time (catch it early and its bank is small). Captured
+            Havas go to <b>prison</b>. Don't want them? Turn <b>Havas</b> off
+            in Settings.
+          </p>
+          <p>
             Short walkers that ignore you and march a straight line back and
             forth. You don't chase a Nasser &mdash; you get where it's going.
             Hug one from <b>behind or the side</b>: walking into its face just
@@ -281,6 +293,12 @@
               <div class="knob"></div>
             </div>
           </div>
+          <div class="setting-row">
+            <label>Havas</label>
+            <div class="toggle on" id="set-havas" data-target="havas">
+              <div class="knob"></div>
+            </div>
+          </div>
           <div
             style="
               margin-top: 18px;
@@ -332,6 +350,12 @@
             <div class="hud-stat">
               <span class="hud-label">COMBO</span>
               <span class="hud-value combo" id="hud-combo">x1</span>
+            </div>
+            <!-- Hava prison — hidden until the first Hava shows up -->
+            <div class="hud-sep hud-prison-part hidden"></div>
+            <div class="hud-stat hud-prison-part hidden" title="Havas in prison">
+              <span class="hud-label">PRISON</span>
+              <span class="hud-value prison" id="hud-prison">0</span>
             </div>
             <div class="hud-spacer"></div>
             <div class="hud-stat hud-stat-level" id="pause-hint" data-action="pause">

@@ -996,6 +996,74 @@ class ToolSystem {
         AudioSystem.toolFire();
         break;
       }
+      /* ---- Hava capture tools. Both only ever target a LEAVING Hava
+         (that's the design: it comes, eats, and you catch it on the way
+         out). They end in Game.captureHava(), which re-checks and goes
+         through co-op arbitration. ---- */
+      case "havanet": {
+        let best = null,
+          bd = range * range;
+        for (const n of nm.list) {
+          if (!n.alive || !n.type.havaType || n.havaState !== "leaving") continue;
+          const d2 = dist2(player.x, player.y, n.x, n.y);
+          if (d2 < bd) {
+            bd = d2;
+            best = n;
+          }
+        }
+        if (!best) break;
+        const h = best;
+        drawRopeLine(player, h, "#c8a06a");
+        Game.particles.text(h.x, h.y - h.radius - 12, "NET!", "#c8a06a", 16);
+        AudioSystem.toolFire();
+        Game.delayedEffects.push({
+          t: CONFIG.hava.netFlightTime,
+          fn: () => {
+            // a short flight — it can still slip out of reach
+            if (h.alive && dist(player.x, player.y, h.x, h.y) < range * 1.25) Game.captureHava(h);
+          },
+        });
+        break;
+      }
+      case "havacage": {
+        // Aim AHEAD: where the Hava will be when the cage slams shut.
+        // Host has real velocity; a co-op puppet estimates it (pvx/pvy).
+        let target = null,
+          bd = range * range;
+        for (const n of nm.list) {
+          if (!n.alive || !n.type.havaType || n.havaState !== "leaving") continue;
+          const d2 = dist2(player.x, player.y, n.x, n.y);
+          if (d2 < bd) {
+            bd = d2;
+            target = n;
+          }
+        }
+        if (!target) break;
+        const fuse = t.def.telegraphTime;
+        const vx = target.pvx != null ? target.pvx : target.vx,
+          vy = target.pvy != null ? target.pvy : target.vy;
+        const cx = target.x + vx * fuse,
+          cy = target.y + vy * fuse;
+        const cr = t.def.cageRadius(t.level) + target.radius * 0.5;
+        Game.telegraphs.push({ x: cx, y: cy, r: cr, color: "#8a9ec9", t: fuse, maxT: fuse });
+        Game.particles.text(cx, cy - cr - 8, "CAGE!", "#dfe6f5", 14);
+        Game.delayedEffects.push({
+          t: fuse,
+          fn: () => {
+            Game.shockwaves.push({ x: cx, y: cy, color: "#dfe6f5", t: 0, duration: 0.3, maxR: cr });
+            AudioSystem.toolFire();
+            for (const n of nm.list) {
+              if (!n.alive || !n.type.havaType || n.havaState !== "leaving") continue;
+              if (dist(cx, cy, n.x, n.y) < cr) {
+                Game.captureHava(n);
+                return;
+              }
+            }
+            Game.particles.text(cx, cy - 10, "MISSED", "#8a9ec9", 12);
+          },
+        });
+        break;
+      }
       case "whistle": {
         // TWEET — everything around you stops dead. The only tool that
         // stuns (stunT) rather than slowing/freezing/pulling, so Bayats

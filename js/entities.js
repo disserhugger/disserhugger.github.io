@@ -351,6 +351,19 @@ class Bayat {
       // validated, grid-snapped one for real spawns.
       this.initPatrol(Math.random() < 0.5 ? "h" : "v", Math.random() < 0.5 ? 1 : -1);
     }
+    if (type.havaType) {
+      // See CLAUDE.md "Havas". hunting -> leaving -> (captured | escaped)
+      this.havaState = "hunting";
+      this.huntT = CONFIG.hava.huntDuration;
+      this.meals = 0;
+      this.bankExp = 0; // banked at CONFIG.hava.bankMult x each meal's value
+      this.bankTime = 0;
+      this.baseRadius = this.radius;
+      this.retargetT = 0;
+      this.prey = null;
+      this.havaVer = 1; // bumps on every change the co-op host must re-send
+      this.havaKnown = true;
+    }
     this.wanderAngle = Math.random() * TAU;
     this.animT = Math.random() * 10;
     this.frozenT = 0;
@@ -513,6 +526,13 @@ class Bayat {
       this.updatePatrol(dt);
       return;
     }
+    // Havas: same reasoning — their own movement, no steering forces.
+    // `others` is the FULL list for them (BayatManager passes it), since
+    // they hunt across the whole huntRange, not just neighbouring cells.
+    if (this.type.havaType) {
+      this.updateHava(dt, others);
+      return;
+    }
     let fx = 0,
       fy = 0;
     const dx = this.x - player.x,
@@ -605,6 +625,159 @@ class Bayat {
     this.y += this.vy * dt;
     this.x = clamp(this.x, this.radius, CONFIG.arena.width - this.radius);
     this.y = clamp(this.y, this.radius, CONFIG.arena.height - this.radius);
+  }
+  /* ---- Hava (havaType) — see CLAUDE.md "Havas" ----
+     HUNTING: chase the best prey in huntRange and eat it on contact.
+     Dangerous prey (Dangerous Bayats, Bulldozers) get a `dangerPriority`
+     head start, so a Hava goes for them first unless a huggable one is a
+     LOT closer — cleaning up what you can't hug is their whole purpose.
+     LEAVING: after huntDuration or a full stomach, walk (slower) to the
+     nearest arena edge. That's the only window capture tools work in.
+     Reaching the edge = escaped, bank and all. */
+  isHavaPrey(n) {
+    return (
+      n !== this &&
+      n.alive &&
+      !n.type.havaType &&
+      !n.type.medkitType && // a co-op revive item isn't food
+      !(n.type.ghostType && n.ghostPhased) &&
+      n.spawnT >= 1
+    );
+  }
+  pickHavaPrey(list) {
+    const cfg = CONFIG.hava;
+    const r2 = cfg.huntRange * cfg.huntRange;
+    let best = null,
+      bestScore = Infinity;
+    for (let i = 0; i < list.length; i++) {
+      const n = list[i];
+      if (!this.isHavaPrey(n)) continue;
+      const d2 = dist2(this.x, this.y, n.x, n.y);
+      if (d2 > r2) continue;
+      const score = Math.sqrt(d2) - (n.noPull ? cfg.dangerPriority : 0);
+      if (score < bestScore) {
+        bestScore = score;
+        best = n;
+      }
+    }
+    return best;
+  }
+  // What a meal is worth to the bank: bankMult x the value a hug of it
+  // would give (same 6*expMult / baseTimeReward*rewardMult base as
+  // applyHugReward). Dangerous prey have no hug value, so they bank at
+  // dangerPreyExpMult/TimeMult instead — eating them still pays.
+  havaMealValue(prey) {
+    const cfg = CONFIG.hava;
+    const bad = prey.type.danger || prey.type.pullImmune;
+    const expMult = bad ? cfg.dangerPreyExpMult : Math.max(0, prey.type.expMult);
+    const timeMult = bad ? cfg.dangerPreyTimeMult : Math.max(0, prey.type.rewardMult);
+    return {
+      exp: cfg.bankMult * 6 * expMult,
+      time: cfg.bankMult * CONFIG.full.baseTimeReward * timeMult * Game.timeRewardFactor(),
+    };
+  }
+  havaEat(prey) {
+    const cfg = CONFIG.hava;
+    prey.alive = false;
+    const v = this.havaMealValue(prey);
+    this.bankExp += v.exp;
+    this.bankTime += v.time;
+    this.meals++;
+    this.radius = Math.min(this.baseRadius * cfg.maxGrowthMult, this.radius + cfg.growPerMeal);
+    this.havaVer++;
+    this.prey = null;
+    Game.onHavaEat(this, prey);
+    if (this.meals >= cfg.stomachSize) this.havaStartLeaving();
+  }
+  havaStartLeaving() {
+    if (this.havaState === "leaving") return;
+    this.havaState = "leaving";
+    // exit through the nearest wall
+    const W = CONFIG.arena.width,
+      H = CONFIG.arena.height;
+    const opts = [
+      { d: this.x, x: 0, y: this.y },
+      { d: W - this.x, x: W, y: this.y },
+      { d: this.y, x: this.x, y: 0 },
+      { d: H - this.y, x: this.x, y: H },
+    ];
+    opts.sort((a, b) => a.d - b.d);
+    this.exitX = opts[0].x;
+    this.exitY = opts[0].y;
+    this.havaVer++;
+    Game.onHavaLeaving(this);
+  }
+  updateHava(dt, list) {
+    const cfg = CONFIG.hava;
+    let tx = null,
+      ty = null,
+      sp = this.effectiveSpeed; // slows/freezes/Time Stop still apply
+    if (this.havaState === "hunting") {
+      this.huntT -= dt;
+      if (this.huntT <= 0) this.havaStartLeaving();
+    }
+    if (this.havaState === "hunting") {
+      this.retargetT -= dt;
+      if (!this.prey || !this.prey.alive || this.retargetT <= 0) {
+        this.prey = this.pickHavaPrey(list);
+        this.retargetT = 0.5;
+      }
+      if (this.prey) {
+        tx = this.prey.x;
+        ty = this.prey.y;
+        if (dist(this.x, this.y, tx, ty) < this.radius + this.prey.radius * 0.6) {
+          this.havaEat(this.prey);
+          return;
+        }
+      } else {
+        // nothing in range: prowl in slow circles until something turns up
+        this.wanderAngle += rand(-0.5, 0.5) * dt * 2;
+        tx = this.x + Math.cos(this.wanderAngle) * 100;
+        ty = this.y + Math.sin(this.wanderAngle) * 100;
+        sp *= 0.5;
+      }
+    } else {
+      tx = this.exitX;
+      ty = this.exitY;
+      sp *= cfg.leaveSpeedMult;
+      const m = cfg.exitMargin;
+      if (
+        this.x <= m || this.y <= m ||
+        this.x >= CONFIG.arena.width - m || this.y >= CONFIG.arena.height - m
+      ) {
+        this.alive = false;
+        Game.onHavaEscaped(this);
+        return;
+      }
+    }
+    const dx = tx - this.x,
+      dy = ty - this.y;
+    const d = Math.sqrt(dx * dx + dy * dy) || 0.001;
+    this.vx = lerp(this.vx, (dx / d) * sp, Math.min(1, dt * 5));
+    this.vy = lerp(this.vy, (dy / d) * sp, Math.min(1, dt * 5));
+    this.x = clamp(this.x + this.vx * dt, 0, CONFIG.arena.width);
+    this.y = clamp(this.y + this.vy * dt, 0, CONFIG.arena.height);
+    if (Math.abs(this.vx) > 1) this.facingDir = this.vx > 0 ? 1 : -1;
+  }
+  // Belly + state label over a Hava's head, in the draw transform.
+  drawHavaLabel(ctx) {
+    const leaving = this.havaState === "leaving";
+    const y = -this.radius * 1.55;
+    ctx.font = "700 12px Consolas, monospace";
+    ctx.textAlign = "center";
+    const bank = "+" + Math.round(CONFIG.hava.baseExp + (this.bankExp || 0)) + " EXP";
+    ctx.fillStyle = "rgba(0,0,0,.65)";
+    ctx.fillRect(-42, y - 12, 84, 16);
+    ctx.fillStyle = "#ffd166";
+    ctx.fillText(bank, 0, y);
+    if (leaving) {
+      const blink = Math.floor(performance.now() / 250) % 2 === 0;
+      ctx.fillStyle = blink ? "#ff5c72" : "#ffffff";
+      ctx.fillText("ESCAPING!", 0, y - 16);
+    } else {
+      ctx.fillStyle = "#c9b3ff";
+      ctx.fillText("HUNGRY " + (this.meals || 0) + "/" + CONFIG.hava.stomachSize, 0, y - 16);
+    }
   }
   /* ---- Nasser patrol (patrolType) ----
      A lane is: an axis ("h"/"v"), a fixed perpendicular coordinate
@@ -805,6 +978,7 @@ class Bayat {
   // practice. Bob/animation still runs locally since it's purely
   // cosmetic and doesn't need to be network-accurate.
   updatePuppet(dt) {
+    this._lastPuppetDt = dt;
     this.animT += dt * 6;
     // MUST advance spawnT here too. draw() scales the sprite by it for
     // the spawn-in pop (`const s = this.spawnT < 1 ? this.spawnT : 1`),
@@ -852,6 +1026,17 @@ class Bayat {
     const buf = this.netBuf;
     if (!buf || buf.length === 0) return;
     const renderAt = performance.now() - Game.mpInterpDelay();
+    if (this.type.havaType) {
+      // Puppet Havas don't simulate — but the Prison Cage aims at where a
+      // Hava is GOING, so estimate velocity from the interpolated motion.
+      const px = this.x,
+        py = this.y;
+      this.puppetInterp(buf, renderAt);
+      const pdt = Math.max(1 / 240, (this._lastPuppetDt || 1 / 60));
+      this.pvx = (this.x - px) / pdt;
+      this.pvy = (this.y - py) / pdt;
+      return;
+    }
     if (this.type.patrolType) {
       // Puppets don't simulate the patrol (the host owns the position —
       // see CLAUDE.md "Nassers" for why syncing the route and simulating
@@ -986,7 +1171,7 @@ class Bayat {
     // Bayat's would be. If nasser.png fails to load they take the
     // procedural fallback below, like any other sprite.
     const patrol = this.type.patrolType;
-    const imgKey = patrol && this.type.spriteKey ? this.type.spriteKey : "bayat";
+    const imgKey = this.type.spriteKey ? this.type.spriteKey : "bayat";
     if (Sprites[imgKey + "Loaded"]) {
       ctx.save();
       ctx.globalAlpha = ghostAlpha;
@@ -1147,6 +1332,7 @@ class Bayat {
       }
     }
     this.drawBadge(ctx);
+    if (this.type.havaType) this.drawHavaLabel(ctx);
     ctx.restore();
     if (this.type.glow && Game.particles && Math.random() < 0.5) {
       Game.particles.burst(
@@ -1175,11 +1361,31 @@ class BayatManager {
     this.list = [];
     this.spawnTimer = 0;
     this.nasserTimer = CONFIG.nasser.firstSpawnDelay;
+    this.havaTimer = CONFIG.hava.firstSpawnDelay;
   }
   reset() {
     this.list = [];
     this.spawnTimer = 0;
     this.nasserTimer = CONFIG.nasser.firstSpawnDelay;
+    this.havaTimer = CONFIG.hava.firstSpawnDelay;
+  }
+  countHava() {
+    let c = 0;
+    for (const n of this.list) if (n.alive && n.type.havaType) c++;
+    return c;
+  }
+  // Havas walk in from a distance rather than popping up next to you.
+  spawnHava(anchor, diff) {
+    const cfg = CONFIG.hava;
+    const ang = Math.random() * TAU;
+    const r = rand(cfg.spawnRingMin, cfg.spawnRingMax);
+    const m = 150;
+    const x = clamp(anchor.x + Math.cos(ang) * r, m, CONFIG.arena.width - m);
+    const y = clamp(anchor.y + Math.sin(ang) * r, m, CONFIG.arena.height - m);
+    const h = new Bayat(BAYAT_TYPES.hava, x, y, diff);
+    this.list.push(h);
+    Game.onHavaArrive(h);
+    return h;
   }
   difficulty(elapsed) {
     return clamp(elapsed / CONFIG.spawn.rampDuration, 0, 1);
@@ -1198,6 +1404,7 @@ class BayatManager {
       if (t.medkitType && !Game.coop) continue;
       // Nassers have their own pool + spawn timer — see pickNasserType().
       if (t.patrolType) continue;
+      if (t.havaType) continue; // own timer — see spawnHava()
       let w = t.weightBase;
       // Golden Minute / Chaos Mode events (goldenWeightMult) heavily
       // favor Golden and Diamond spawns while active.
@@ -1449,6 +1656,19 @@ class BayatManager {
         if (t) this.spawnPatrol(t, anchor, diff);
       }
     }
+    // Havas: their own (slow) timer, same shape as the Nassers'.
+    const hc = CONFIG.hava;
+    if (Game.havasOn) this.havaTimer -= dt; // Settings > Havas
+    if (Game.havasOn && this.havaTimer <= 0) {
+      this.havaTimer = lerp(hc.spawnInterval, hc.spawnIntervalMin, diff);
+      if (this.countHava() < hc.maxAlive) {
+        const anchor =
+          extraSpawnAnchors && extraSpawnAnchors.length && Math.random() < 0.5
+            ? choice(extraSpawnAnchors)
+            : player;
+        this.spawnHava(anchor, diff);
+      }
+    }
     this.syncFormations();
     this.buildGrid();
     for (let i = this.list.length - 1; i >= 0; i--) {
@@ -1480,7 +1700,12 @@ class BayatManager {
       }
       // Nassers ignore separation entirely (they return before it), so
       // they don't need a neighbour query at all.
-      n.update(dt, target, n.type.patrolType ? this.list : this.neighbours(n), blackHoleLevel);
+      n.update(
+        dt,
+        target,
+        n.type.patrolType || n.type.havaType ? this.list : this.neighbours(n),
+        blackHoleLevel,
+      );
     }
   }
   // Co-op, non-host clients: called instead of update() above — no
@@ -1495,7 +1720,7 @@ class BayatManager {
   // host no longer lists (it died — a hugResult already handled the
   // death fx locally, this is just cleanup for ids we somehow missed,
   // e.g. this client joined mid-run and never saw the original spawn).
-  applySnapshot(flat, intro, difficulty, sampleT, patrols) {
+  applySnapshot(flat, intro, difficulty, sampleT, patrols, havas) {
     /* sampleT is the host's send time mapped onto our clock
        (Game.mpSampleTime). Buffering by that instead of by arrival time
        is what makes remote motion smooth: the host emits snapshots at a
@@ -1571,6 +1796,21 @@ class BayatManager {
     /* Nasser lanes: [id, axis(0=h,1=v), lo, hi, line, ...]. DISPLAY ONLY —
        drives the path hint. The puppet's position still comes purely from
        the snapshot stream above; nothing simulates the patrol here. */
+    /* Hava state: [id, leaving(0/1), bankExp, bankTime*10, radius, meals,
+       ...]. Drives the joiner's belly label, the ESCAPING marker and
+       whether their capture tools may target it. The position still
+       comes from the snapshot stream — nothing simulates it here. */
+    if (Array.isArray(havas)) {
+      for (let i = 0; i + 5 < havas.length; i += 6) {
+        const n = idMap.get(havas[i]);
+        if (!n || !n.type.havaType) continue;
+        n.havaState = havas[i + 1] ? "leaving" : "hunting";
+        n.bankExp = havas[i + 2];
+        n.bankTime = havas[i + 3] / 10;
+        n.radius = havas[i + 4];
+        n.meals = havas[i + 5];
+      }
+    }
     if (Array.isArray(patrols)) {
       for (let i = 0; i + 4 < patrols.length; i += 5) {
         const n = idMap.get(patrols[i]);
