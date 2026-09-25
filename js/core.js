@@ -152,6 +152,29 @@ function fmtTime(s) {
   return s.toFixed(1);
 }
 
+/* Runs fn() with Math.random temporarily replaced by a seeded PRNG
+   (mulberry32), so everything it calls — rand(), choice(), direct
+   Math.random() — is deterministic. Used to give every co-op player the
+   IDENTICAL floor/decor/zones from the host's seed. A null seed just
+   runs fn normally. Always restored, even if fn throws. */
+function withSeededRandom(seed, fn) {
+  if (seed == null) return fn();
+  let a = seed >>> 0;
+  const seeded = () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const orig = Math.random;
+  Math.random = seeded;
+  try {
+    return fn();
+  } finally {
+    Math.random = orig;
+  }
+}
 function weightedPick(items) {
   let total = 0;
   for (const it of items) total += it.weight;

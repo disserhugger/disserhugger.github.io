@@ -1,5 +1,44 @@
 "use strict";
 
+/* Baked glows. A canvas shadowBlur is recomputed on EVERY draw call; for
+   Golden/Diamond/Dangerous/Bulldozer sprites that was ~11 blurred draws a
+   frame, the classic mobile-GPU frame killer. The glow only depends on
+   (sprite, tint, size, colour, blur), so it's rendered once into an
+   offscreen canvas and then drawn like any other image. Visually the
+   same as the live blur; bounded cache so odd sizes can't grow it. */
+const GlowCache = {
+  map: new Map(),
+  get(src, tintKey, w, h, color, blur) {
+    if (!src || !src.width) return null;
+    const dpr = Game.canvas && Game.camera.w ? Game.canvas.width / Game.camera.w : 1;
+    const key = tintKey + "|" + color + "|" + blur + "|" + Math.round(w) + "x" + Math.round(h) + "|" + dpr.toFixed(2);
+    let e = this.map.get(key);
+    if (e) return e;
+    if (this.map.size >= CONFIG.perf.glowCacheMax) this.map.clear();
+    // shadowBlur is in DEVICE pixels (the transform doesn't scale it), so
+    // pad by blur/dpr in CSS px and bake at device resolution.
+    const pad = Math.ceil((blur * 1.4) / dpr) + 2;
+    const cw = Math.ceil((w + pad * 2) * dpr),
+      ch = Math.ceil((h + pad * 2) * dpr);
+    const c = document.createElement("canvas");
+    c.width = cw;
+    c.height = ch;
+    const g = c.getContext("2d");
+    if (!g) return null;
+    g.imageSmoothingEnabled = false;
+    g.shadowColor = color;
+    g.shadowBlur = blur;
+    g.drawImage(src, pad * dpr, pad * dpr, w * dpr, h * dpr);
+    // pad from the real (rounded) canvas size, so rounding never shifts it
+    e = { canvas: c, pad: (cw / dpr - w) / 2 };
+    this.map.set(key, e);
+    return e;
+  },
+  clear() {
+    this.map.clear();
+  },
+};
+
 /* =========================================================
    PARTICLE SYSTEM (particles + floating text combined)
    ========================================================= */
@@ -11,6 +50,11 @@ class ParticleSystem {
   burst(x, y, color, count, opts) {
     opts = opts || {};
     const n = Game.settings.reducedParticles ? Math.ceil(count * 0.4) : count;
+    // Cosmetic cap: in a Hyper Mode pile-up bursts can stack into the
+    // thousands; beyond maxParticles the OLDEST are dropped (they're the
+    // most faded anyway). Gameplay never reads particles.
+    const over = this.particles.length + n - CONFIG.perf.maxParticles;
+    if (over > 0) this.particles.splice(0, Math.min(over, this.particles.length));
     for (let i = 0; i < n; i++) {
       const ang = Math.random() * TAU;
       const spd = rand(opts.minSpeed || 40, opts.maxSpeed || 220);
@@ -67,10 +111,22 @@ class ParticleSystem {
     }
   }
   draw(ctx, cam) {
+    // Off-screen particles used to be drawn too (a full burst far away cost
+    // the same as one on screen). Cull, and only touch fillStyle when the
+    // colour actually changes — bursts are runs of the same colour.
+    const x0 = cam.x - 16,
+      y0 = cam.y - 16,
+      x1 = cam.x + cam.w + 16,
+      y1 = cam.y + cam.h + 16;
+    let lastColor = null;
     for (const p of this.particles) {
+      if (p.x < x0 || p.x > x1 || p.y < y0 || p.y > y1) continue;
       const a = 1 - p.age / p.life;
       ctx.globalAlpha = Math.max(0, a);
-      ctx.fillStyle = p.color;
+      if (p.color !== lastColor) {
+        ctx.fillStyle = p.color;
+        lastColor = p.color;
+      }
       const sx = p.x - cam.x,
         sy = p.y - cam.y;
       if (p.shape === "spark") {
@@ -439,6 +495,80 @@ function drawRemotePlayer(ctx, cam, puppet) {
   ctx.fillStyle = puppet.downed ? "#ff8a8a" : "#fff";
   ctx.fillText(label, sx, sy - radius - 10);
   ctx.restore();
+}
+
+/* Off-screen teammate arrows (co-op). Each teammate outside the view
+   gets a pixel arrow pinned to the screen edge along the line from the
+   screen centre toward them, in their colour, with their name and a
+   rough distance. A DOWNED teammate's arrow blinks red with a "!" —
+   that's the one you need to run to with a medkit. Screen space, like
+   the HUD. */
+function drawTeammateArrows(ctx, cam, peers) {
+  const c = CONFIG.coop;
+  if (!c.teammateArrows) return;
+  const cx = cam.w / 2,
+    cy = cam.h / 2;
+  const blink = Math.floor(performance.now() / 260) % 2 === 0;
+  for (const id in peers) {
+    const p = peers[id];
+    const sx = p.x - cam.x,
+      sy = p.y - cam.y;
+    if (sx > -10 && sx < cam.w + 10 && sy > -10 && sy < cam.h + 10) continue; // on screen
+    const dx = sx - cx,
+      dy = sy - cy;
+    // Scale the direction until it touches the inset screen rectangle.
+    const halfW = cx - c.arrowEdgeInset;
+    const top = c.arrowTopInset,
+      bottom = c.arrowEdgeInset;
+    const k = Math.min(
+      Math.abs(halfW / (dx || 0.001)),
+      dy < 0 ? Math.abs((cy - top) / dy) : Math.abs((cy - bottom) / (dy || 0.001)),
+    );
+    const ax = cx + dx * k,
+      ay = cy + dy * k;
+    const ang = Math.atan2(dy, dx);
+    const col = p.downed ? (blink ? "#ff5c72" : "#ffffff") : p.color || "#fff";
+    ctx.save();
+    ctx.translate(Math.round(ax), Math.round(ay));
+    ctx.save();
+    ctx.rotate(ang);
+    ctx.beginPath();
+    ctx.moveTo(12, 0);
+    ctx.lineTo(-7, -9);
+    ctx.lineTo(-3, 0);
+    ctx.lineTo(-7, 9);
+    ctx.closePath();
+    ctx.fillStyle = col;
+    ctx.strokeStyle = "rgba(0,0,0,.75)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fill();
+    ctx.restore();
+    // Label anchored on the side AWAY from the edge the arrow is pinned
+    // to, so it never runs off-screen or over its own arrow.
+    const ca = Math.cos(ang),
+      sa = Math.sin(ang);
+    let lx = 0,
+      ly = 0;
+    if (ca > 0.5) {
+      ctx.textAlign = "right";
+      lx = -16;
+    } else if (ca < -0.5) {
+      ctx.textAlign = "left";
+      lx = 16;
+    } else {
+      ctx.textAlign = "center";
+      ly = sa > 0 ? -18 : 20;
+    }
+    const meters = Math.round(Math.hypot(dx, dy) / 24); // ~24px per metre, the Nasser leg scale
+    const label = (p.downed ? "! " : "") + String(p.name || "?").slice(0, 10) + " " + meters + "m";
+    ctx.font = "bold 10px Consolas, 'Courier New', monospace";
+    ctx.fillStyle = "rgba(0,0,0,.7)";
+    ctx.fillText(label, lx + 1, ly + 4);
+    ctx.fillStyle = p.downed ? "#ff8a8a" : "#fff";
+    ctx.fillText(label, lx, ly + 3);
+    ctx.restore();
+  }
 }
 
 /* =========================================================

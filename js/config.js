@@ -34,6 +34,11 @@ const ASSETS = {
   // any image; it's squashed SHORT at draw time (CONFIG.nasser.spriteHeightMult).
   // If it fails to load they're drawn procedurally, never as a Bayat.
   nasser: "assets/nasser.png",
+  // GOD — the character who hands you your prizes (chests, level-ups,
+  // evolutions...). Replace with any image; it's scaled to fit and drawn
+  // pixelated. Generated placeholder: gen_god.py. If it fails to load the
+  // prize popup still shows, just without the portrait.
+  god: "assets/god.png",
   jumpscare: "assets/jumpscare.png", // the "Mr. Squeeze" mascot still-image
 
   // --- optional jumpscare media (set to null to disable either one) ---
@@ -142,6 +147,31 @@ const CONFIG = {
     pathHintColor: "#fff4c2",
   },
 
+  // ---- performance (see CLAUDE.md "Performance") ----
+  // None of these touch spawning or the simulation — every Bayat and
+  // Nasser still spawns and runs its full AI every frame.
+  perf: {
+    maxParticles: 1200, // cosmetic particles beyond this are dropped (oldest first)
+    glowCacheMax: 160, // baked glow sprites kept before the cache resets
+  },
+
+  // ---- GOD, the prize giver (see CLAUDE.md "GOD") ----
+  // Every time you're given something, GOD pops up to present it.
+  god: {
+    prizeTitle: "The GODs have given you a prize!",
+    curseTitle: "The GODs have cursed you...",
+    levelUpSub: "Level up! Choose your prize",
+    popupMs: 2400, // how long each prize popup stays up
+    maxQueued: 4, // a burst of rewards queues up to this many popups
+    // which rewards GOD presents (false = plain toast like before)
+    onChest: true,
+    onLevelUp: true, // the Full Game level-up card screen
+    onArcadeLevel: true, // Arcade's automatic stat boosts
+    onEvolution: true,
+    onSynergy: true,
+    onCursed: true,
+  },
+
   // ---- per-Bayat-ability tunables ----
   boost: {
     duration: 8,
@@ -227,9 +257,31 @@ const CONFIG = {
     fuseDuration: 1.6,
     explosionRadius: 200,
   },
+  // ---- big content pass: shared numbers for the new tools/buffs. Per-
+  // level scaling lives in each def in content.js, like every other tool.
+  beartrap: {
+    fuseDuration: 1.1, // armed at your feet, snaps shut after this
+    baseRadius: 110,
+  },
+  lullaby: {
+    tickInterval: 6.5, // seconds between lullabies (shortened by level)
+  },
+  honeypot: {
+    pullSpeed: 70, // px/s the pool drags Bayats toward its centre
+  },
+  momentum: {
+    perCombo: 0.01, // +1% speed per combo step, per level...
+    capPerLevel: 0.06, // ...capped at +6% per level
+  },
 
   // ---- co-op multiplayer (see js/multiplayer.js + CLAUDE.md) ----
   coop: {
+    // Edge-of-screen arrows pointing at teammates who are off-screen (and
+    // flashing red when they're down and need a medkit). See
+    // drawTeammateArrows() in render-helpers.js.
+    teammateArrows: true,
+    arrowEdgeInset: 26, // px from the screen edge
+    arrowTopInset: 84, // keeps top-edge arrows clear of the HUD panel
     /* ★★★ CO-OP SETUP — THIS IS THE ONE SETTING THAT MATTERS ★★★
        ------------------------------------------------------------------
        Set this to your deployed relay and co-op works reliably between

@@ -89,6 +89,9 @@ const Game = {
 
   init() {
     UI.cacheEls();
+    UI.initFullscreen();
+    UI.decorateIcons();
+    UI.initGod();
     this.settings = SaveSystem.getSettings();
     AudioSystem.init(this.settings);
     this.canvas = document.getElementById("gameCanvas");
@@ -184,6 +187,11 @@ const Game = {
       // since that's only 5% of scares and otherwise a pain to test.
       if (k === "j" && this.state === "playing" && this.jumpscareT <= 0) {
         this.triggerJumpscare(e.shiftKey ? true : undefined);
+      }
+      // F toggles fullscreen anywhere (same as the corner button). Skipped
+      // while typing in a text field, e.g. the co-op username.
+      if (k === "f" && !(e.target && /INPUT|TEXTAREA/.test(e.target.tagName))) {
+        UI.toggleFullscreen();
       }
       // Test hotkey: K spawns a Nasser close by so the patrol/intercept
       // feel can be tuned without waiting for the spawn roll. Host/solo
@@ -309,9 +317,11 @@ const Game = {
         AudioSystem.resume();
         switch (action) {
           case "start-arcade":
+            if (this.coop) this.mpEndCoopSession(); // a solo run is never networked
             this.startGame("arcade");
             break;
           case "start-full":
+            if (this.coop) this.mpEndCoopSession();
             this.startGame("full");
             break;
           case "show-htp":
@@ -321,6 +331,10 @@ const Game = {
             UI.showScreen("screen-settings");
             break;
           case "back-menu":
+            // From a co-op results screen: actually leave the room. This
+            // used to leave this.coop true, so the next SOLO run still
+            // routed every hug through the network.
+            if (this.coop) this.mpEndCoopSession();
             UI.updateMenuStats();
             UI.showScreen("screen-menu");
             break;
@@ -329,16 +343,19 @@ const Game = {
             UI.updateMenuStats();
             break;
           case "retry":
-            // Co-op has no "restart together" flow (out of scope — see
-            // CLAUDE.md "Multiplayer" known gaps) — Play Again after a
-            // co-op run just leaves the room and retries solo, rather
-            // than silently half-restarting a session other peers still
-            // think is live.
-            if (this.coop) this.mpEndCoopSession();
+            // Co-op: restart together (host) / back to the lobby (joiner)
+            // — see mpRestartTogether().
+            if (this.coop) {
+              this.mpRestartTogether();
+              break;
+            }
             this.startGame(this.mode);
             break;
           case "pause":
             if (this.state === "playing") this.pause();
+            break;
+          case "toggle-fullscreen":
+            UI.toggleFullscreen();
             break;
           case "resume":
             this.resumeGame();
@@ -532,14 +549,11 @@ const Game = {
   mpBindRoomCallbacks() {
     Multiplayer.onPeerJoin = (peerId) => {
       console.log("[Co-op] peer joined:", peerId);
-      this.mpRefreshLobby();
+      this.mpOnPeerJoin(peerId);
     };
     Multiplayer.onPeerLeave = (peerId) => {
       console.log("[Co-op] peer left:", peerId);
-      this.mpRefreshLobby();
-      if (this.mpInLobby) {
-        UI.toast("A player left the lobby.", 1800);
-      }
+      this.mpOnPeerLeave(peerId);
     };
     Multiplayer.onPeerProfile = (peerId, profile) => {
       console.log("[Co-op] peer profile:", peerId, profile);
@@ -549,7 +563,17 @@ const Game = {
     // Registered here (lobby-join time) rather than at run-start so they're
     // ready the instant a "start" broadcast arrives — they're all no-ops
     // until this.coop actually flips true. ----
-    Multiplayer.on("start", (data) => this.mpOnStartReceived(data));
+    Multiplayer.on("start", (data, peerId) => this.mpOnStartReceived(data, peerId));
+    // ---- session-level messages (see CLAUDE.md "Co-op overhaul") ----
+    Multiplayer.on("hostHello", (data, peerId) => {
+      this.mpHostId = peerId;
+      this.mpRefreshLobby();
+    });
+    Multiplayer.on("hostChange", (data, peerId) => this.mpOnHostChange(peerId));
+    Multiplayer.on("event", (data) => this.mpOnEvent(data));
+    Multiplayer.on("eventRequest", () => this.mpOnEventRequest());
+    Multiplayer.on("decorBreak", (data) => this.mpOnDecorBreak(data));
+    Multiplayer.on("fxZone", (data) => this.mpOnFxZone(data));
     Multiplayer.on("playerState", (data, peerId) =>
       this.mpOnPlayerState(data, peerId),
     );
@@ -570,7 +594,7 @@ const Game = {
   },
   mpRefreshLobby() {
     if (!this.mpInLobby || !this.mpProfile) return;
-    UI.renderMpPeerList(Multiplayer.peers, this.mpProfile, Multiplayer.isHost);
+    UI.renderMpPeerList(Multiplayer.peers, this.mpProfile, Multiplayer.isHost, this.mpHostId);
     UI.els["mp-start-btn"].classList.toggle("hidden", !Multiplayer.isHost);
   },
   // Ticks the lobby's live connection readout once a second while you're
@@ -605,6 +629,7 @@ const Game = {
       return;
     }
     this.mpBindRoomCallbacks();
+    this.mpHostId = Multiplayer.selfId;
     this.mpInLobby = true;
     UI.els["mp-room-code"].textContent = code;
     this.mpRefreshLobby();
@@ -634,6 +659,7 @@ const Game = {
       return;
     }
     this.mpBindRoomCallbacks();
+    this.mpHostId = null; // learned from the host's hostHello / start
     this.mpInLobby = true;
     UI.els["mp-room-code"].textContent = code;
     this.mpRefreshLobby();
@@ -673,17 +699,207 @@ const Game = {
   mpStartRun() {
     if (!Multiplayer.isHost) return;
     const arenaId = this.selectedArenaId;
-    Multiplayer.send("start", { arenaId });
-    this.mpBeginCoopRun(arenaId);
+    /* The host decides everything that should be the SAME for everyone:
+       a world seed (floor/decor/zones — so a rock is where your friend
+       says it is, and Bouncer Nassers turn at decor everyone can see) and
+       the run modifier (previously each player rolled their own, so one
+       player could be in Fast World while the other wasn't). */
+    const seed = (Math.random() * 2147483647) | 0;
+    const mod = this.pickRunModifier();
+    const modId = mod ? mod.id : null;
+    Multiplayer.send("start", { arenaId, seed, mod: modId });
+    this.mpBeginCoopRun(arenaId, seed, modId, null, null);
   },
-  mpOnStartReceived(data) {
-    if (Multiplayer.isHost || !this.mpInLobby) return;
-    this.mpBeginCoopRun(data.arenaId);
+  /* Accepted from the lobby (the normal start), AND from the results
+     screen of a finished co-op run — that's "restart together": the host
+     presses Play Again and everyone still looking at their results drops
+     into the new run with them. Also how a LATE joiner enters a run
+     already in progress (the host targets a start at them on join). */
+  mpOnStartReceived(data, peerId) {
+    if (Multiplayer.isHost) return;
+    const onResults = this.coop && this.state === "gameover";
+    if (!this.mpInLobby && !onResults) return;
+    if (peerId) this.mpHostId = peerId;
+    this.mpBeginCoopRun(data.arenaId, data.seed, data.mod, data.ev, data.br);
   },
-  mpBeginCoopRun(arenaId) {
+  // True while this client is inside a live co-op run (paused and the
+  // level-up card screen still count — the shared world doesn't stop).
+  mpRunActive() {
+    return (
+      this.coop &&
+      (this.state === "playing" || this.state === "paused" || this.state === "levelup")
+    );
+  },
+  /* Everything a late joiner needs to enter the run already in progress:
+     the same arena/seed/modifier, the current event (with how far into it
+     we are), and which decor has already been broken. */
+  mpRunStartPayload() {
+    const br = [];
+    if (this.decor) this.decor.forEach((d, i) => d.broken && br.push(i));
+    return {
+      arenaId: this.selectedArenaId,
+      seed: this.mpWorldSeed,
+      mod: this.runModifier ? this.runModifier.id : null,
+      ev: this.activeEvent ? { id: this.activeEvent.def.id, t: this.activeEvent.t } : null,
+      br,
+    };
+  },
+  mpOnPeerJoin(peerId) {
+    this.mpRefreshLobby();
+    // Tell the newcomer we're down, or they'd treat us as up (and their
+    // shared-wipe check would be wrong).
+    if (this.mpRunActive() && this.player && this.player.downed) {
+      Multiplayer.send("downedState", { downed: true }, peerId);
+    }
+    if (!Multiplayer.isHost) return;
+    Multiplayer.send("hostHello", {}, peerId);
+    if (this.mpRunActive()) {
+      /* MID-RUN JOIN: previously a late joiner just sat in a lobby nobody
+         was looking at. Now the host hands them the live run. Their puppet
+         appears for everyone on their first playerState (mpOnPlayerState
+         already creates unknown peers), and forcing a keyframe means the
+         very next snapshot introduces every Bayat's type to them instead
+         of making them wait up to snapshotKeyframeMs. */
+      Multiplayer.send("start", this.mpRunStartPayload(), peerId);
+      this._mpNextKeyframe = 0;
+      UI.toast("A player joined the run!", 1800);
+    }
+  },
+  mpOnPeerLeave(peerId) {
+    this.mpRefreshLobby();
+    if (this.mpInLobby) UI.toast("A player left the lobby.", 1800);
+    const wasHost = peerId === this.mpHostId;
+    /* Drop the puppet. Previously a player who left mid-run stayed in
+       mpPeers forever as a frozen ghost: Bayats kept reacting to them,
+       snapshots kept being culled around them, and — worst — a lone
+       survivor who ran out of time went "down" waiting for the ghost to
+       revive them, which soft-locked the run. */
+    if (this.mpPeers && this.mpPeers[peerId]) {
+      if (this.mpRunActive()) UI.toast(this.mpPeers[peerId].name + " left the run.", 2000);
+      delete this.mpPeers[peerId];
+    }
+    if (this.mpClockOffsets) delete this.mpClockOffsets[peerId];
+    if (wasHost && (this.mpRunActive() || this.mpInLobby)) this.mpElectHost();
+    if (this.mpRunActive()) this.mpCheckAllDowned();
+  },
+  /* HOST MIGRATION. When the host leaves, every remaining client runs the
+     same deterministic election (lowest peer id among the players still
+     in the run) so they agree without a round of voting. The winner
+     promotes itself and broadcasts hostChange, which also corrects anyone
+     whose roster briefly disagreed. Lobby waiters aren't eligible mid-run
+     — they aren't simulating anything to take over. */
+  mpElectHost() {
+    const pool = this.mpRunActive() ? Object.keys(this.mpPeers) : Object.keys(Multiplayer.peers);
+    const ids = [Multiplayer.selfId, ...pool].filter(Boolean).sort();
+    const next = ids[0];
+    if (next === Multiplayer.selfId) this.mpPromoteToHost();
+    else this.mpOnHostChange(next);
+  },
+  mpOnHostChange(peerId) {
+    if (peerId === Multiplayer.selfId) return;
+    const changed = this.mpHostId !== peerId || Multiplayer.isHost;
+    this.mpHostId = peerId;
+    Multiplayer.isHost = false;
+    if (changed && this.mpRunActive()) {
+      // Claims addressed to the old host will never be answered. Drop
+      // them — the predicted-away Bayats come back in the new host's
+      // snapshot and can simply be hugged again.
+      this.mpPendingClaims = {};
+      // Samples from the old host are on a different clock; mixing them
+      // with the new host's would stall interpolation. Start clean.
+      for (const n of this.bayats.list) n.netBuf = null;
+      const who = (Multiplayer.peers[peerId] && Multiplayer.peers[peerId].name) || "Another player";
+      UI.toast("The host left — " + who + " is hosting now.", 2600);
+    }
+    this.mpRefreshLobby();
+  },
+  mpPromoteToHost() {
+    Multiplayer.isHost = true;
+    this.mpHostId = Multiplayer.selfId;
+    Multiplayer.send("hostChange", {});
+    if (this.mpRunActive()) {
+      /* Our puppets become the real simulation. They're already full
+         Bayat objects (type, position, CC timers), so this is mostly
+         bookkeeping: stop interpolating, and make sure ids WE spawn from
+         now on can't collide with ones the old host handed out. */
+      let maxId = 0;
+      for (const n of this.bayats.list) {
+        maxId = Math.max(maxId, n.id || 0);
+        n.netBuf = null;
+        n.netTargetX = n.netTargetY = null;
+        n.vx = n.vy = 0;
+        if (n.type.patrolType) n.patrolKnown = true;
+      }
+      if (BAYAT_UID <= maxId) BAYAT_UID = maxId + 1;
+      // Our own claims can't be answered by anyone else now — we're the
+      // authority, and prediction already removed those Bayats, so award
+      // them rather than silently eating the hugs.
+      for (const id in this.mpPendingClaims) {
+        const b = this.mpPendingClaims[id];
+        if (b && typeof b === "object") this.applyHugReward(b, false, true);
+      }
+      this.mpPendingClaims = {};
+      this.bayats.spawnTimer = 0;
+      this.mpNextBayatSend = 0;
+      this._mpNextKeyframe = 0; // everyone relearns types from us at once
+      UI.toast("The host left — you're hosting now. The run continues!", 3000);
+    } else {
+      UI.toast("The host left — you're the host now.", 2400);
+    }
+    this.mpRefreshLobby();
+  },
+  /* RESTART TOGETHER (results screen "Play Again" in co-op). Previously
+     this left the room and restarted SOLO. Now the host starts a fresh
+     co-op run for the whole room (anyone on their results screen or in
+     the lobby joins it), and a non-host goes back to the lobby to wait
+     for the host, still connected. */
+  mpRestartTogether() {
+    if (Multiplayer.isHost) {
+      this.mpStartRun();
+      return;
+    }
+    this.coop = false;
+    this.mpPeers = {};
+    this.mpPendingClaims = {};
+    this.state = "menu";
+    UI.els["hud"].classList.remove("active");
+    this.mpInLobby = true;
+    this.mpRefreshLobby();
+    this.mpStartLobbyPolling();
+    UI.showScreen("screen-mp-lobby");
+    UI.toast("Waiting for the host to start the next run...", 2400);
+  },
+  /* THE SHARED WORLD KEEPS TURNING. update() stops on pause, on the
+     level-up card screen and during hitstops/jumpscares — and all the
+     co-op networking lived inside it. So whenever the HOST picked an
+     upgrade card (Full mode, every level) or got jumpscared (up to 6s),
+     every other player's Bayats froze solid and the host's puppet
+     stopped updating. This keeps the shared parts ticking while the
+     local player is "away": the host's Bayat sim + snapshots, everyone's
+     playerState, teammate interpolation and revive checks. The local
+     player themself just stands still, which is exactly what pausing in
+     a co-op survivors game should mean. */
+  mpBackgroundTick(dt) {
+    if (Multiplayer.isHost) {
+      this.bayats.update(
+        dt,
+        this.elapsed,
+        this.player,
+        this.player.blackHoleLevel,
+        Object.values(this.mpPeers),
+      );
+    } else {
+      this.bayats.updateAsPuppets(dt);
+    }
+    this.mpUpdateNetworking(dt);
+  },
+  mpBeginCoopRun(arenaId, seed, modId, ev, broken) {
     this.mpStopLobbyPolling();
     this.mpInLobby = false;
     this.coop = true;
+    this.mpWorldSeed = typeof seed === "number" ? seed : null;
+    // undefined = an older host that didn't send one: roll locally as before
+    this.mpRunModifierId = modId;
     if (ARENAS.some((a) => a.id === arenaId)) this.selectedArenaId = arenaId;
     // Wall-clock send deadlines (see mpUpdateNetworking). 0 = send on the
     // very first frame of the run.
@@ -714,6 +930,15 @@ const Game = {
       };
     }
     this.startGame("full");
+    // Late join: pick up the event already running, and the rocks other
+    // players have already broken.
+    if (ev && ev.id) {
+      const def = EVENT_POOL.find((e) => e.id === ev.id);
+      if (def) this.startEvent(def, ev.t || 0);
+    }
+    if (Array.isArray(broken) && this.decor) {
+      for (const i of broken) if (this.decor[i]) this.decor[i].broken = true;
+    }
   },
   // ---- per-frame networking: called from update(dt) only while
   // this.coop is true. Position/Bayat-snapshot broadcast tick rates are
@@ -982,7 +1207,7 @@ const Game = {
   mpOnBayatEffect(data, peerId) {
     if (!this.coop || !Multiplayer.isHost || !data || !data.effects) return;
     for (const e of data.effects) {
-      const n = this.bayats.list.find((b) => b.id === e.id);
+      const n = this.bayats.byId(e.id);
       if (!n || !n.alive) continue;
       if (e.h != null) {
         n.hookedT = Math.max(n.hookedT, e.h);
@@ -1110,7 +1335,7 @@ const Game = {
   // the same id loses (bayat.alive is already false by then).
   mpOnHugClaim(data, peerId) {
     if (!this.coop || !Multiplayer.isHost) return;
-    const bayat = this.bayats.list.find((n) => n.id === data.bayatId);
+    const bayat = this.bayats.byId(data.bayatId);
     const valid = !!(bayat && bayat.alive);
     if (valid) {
       bayat.alive = false;
@@ -1139,7 +1364,7 @@ const Game = {
       return;
     }
 
-    const inList = this.bayats.list.find((n) => n.id === data.bayatId);
+    const inList = this.bayats.byId(data.bayatId);
     if (inList) {
       const idx = this.bayats.list.indexOf(inList);
       if (idx >= 0) this.bayats.list.splice(idx, 1);
@@ -1324,9 +1549,14 @@ const Game = {
     this.tools = new ToolSystem();
     this.chests = new ChestSystem();
     this.arena = ARENAS.find((a) => a.id === this.selectedArenaId) || ARENAS[0];
-    this.floor = generateFloorTiles(this.arena);
-    this.decor = generateDecor(this.arena);
-    this.zones = generateZones(this.arena);
+    // Co-op: the host's seed makes floor/decor/zones identical for every
+    // player (see mpStartRun). Solo keeps plain Math.random, unchanged.
+    const worldSeed = this.coop && this.mpWorldSeed != null ? this.mpWorldSeed : null;
+    withSeededRandom(worldSeed, () => {
+      this.floor = generateFloorTiles(this.arena);
+      this.decor = generateDecor(this.arena);
+      this.zones = generateZones(this.arena);
+    });
     this.delayedEffects = [];
     this.projectiles = [];
     this.telegraphs = [];
@@ -1358,6 +1588,7 @@ const Game = {
     this.jumpscareT = 0;
     this.jumpscareGolden = false;
     this.stopJumpscareMedia(); // a new run must never inherit a scare in progress
+    UI.godClear(); // ...or a queue of GOD popups from the last one
     this.pickups = [];
     this.pickupSpawnTimer = CONFIG.pickups.spawnInterval * 0.5;
     this.runAchievementFlags = {}; // per-run flags some achievements need (e.g. "watched 10 slips")
@@ -1365,6 +1596,7 @@ const Game = {
     this.achievementsThisRun = [];
     this.cursedItemsTaken = {};
     this.nasserBumpsThisRun = 0; // head-on Nasser bumps — see nasserHeadOn()
+    this.nasserHugStreak = 0; // Nasser hugs since the last bump — see onNasserHug()
     this.rollRunModifier();
     this.timer =
       mode === "arcade" ? CONFIG.arcade.duration : CONFIG.full.startTime;
@@ -1380,14 +1612,19 @@ const Game = {
   // 40% of runs get a random ARENA_MODIFIERS wildcard; the rest are
   // plain. Rolled once here, read live everywhere else via
   // Game.runModifier — see each field's use for exact hook points.
+  pickRunModifier() {
+    if (Math.random() < 0.6) return null;
+    return weightedPick(ARENA_MODIFIERS.map((m) => ({ item: m, weight: m.weight })));
+  },
   rollRunModifier() {
-    if (Math.random() < 0.6) {
-      this.runModifier = null;
-      return;
+    // Co-op: the host already picked it for everyone (see mpStartRun).
+    // null means "no modifier"; undefined means an older host that sent
+    // nothing, so roll locally like before.
+    if (this.coop && this.mpRunModifierId !== undefined) {
+      this.runModifier = ARENA_MODIFIERS.find((m) => m.id === this.mpRunModifierId) || null;
+    } else {
+      this.runModifier = this.pickRunModifier();
     }
-    this.runModifier = weightedPick(
-      ARENA_MODIFIERS.map((m) => ({ item: m, weight: m.weight })),
-    );
     if (this.runModifier) {
       UI.toast(
         "⚡ " + this.runModifier.name + ": " + this.runModifier.desc,
@@ -1411,6 +1648,7 @@ const Game = {
     this.state = "menu";
     UI.els["hud"].classList.remove("active");
     UI.hideUpgradeModal();
+    UI.godClear();
     UI.updateActiveEventBanner(false, null);
     this.jumpscareT = 0;
     this.stopJumpscareMedia();
@@ -1436,6 +1674,9 @@ const Game = {
     this.mpPeers = {};
     this.mpClockOffsets = {};
     this.mpPendingClaims = {};
+    this.mpHostId = null;
+    this.mpWorldSeed = null;
+    this.mpRunModifierId = undefined;
   },
 
   timeRewardFactor() {
@@ -1891,6 +2132,7 @@ const Game = {
       if (type.diamondType) this.checkAchievement("diamondhug");
       if (type.miniBoss) this.checkAchievement("miniboss");
       if (type.ghostType) this.checkAchievement("ghosthug");
+      if (type.patrolType) this.onNasserHug(bayat);
     }
 
     if (type.medkitType) {
@@ -2145,15 +2387,36 @@ const Game = {
         (!this.coop || Multiplayer.isHost)
       ) {
         const pull = 90;
+        const peers = this.coop ? Object.values(this.mpPeers) : null;
         for (const n of this.bayats.list) {
-          if (!n.alive || n.type.danger) continue;
-          const a = Math.atan2(this.player.y - n.y, this.player.x - n.x);
+          if (!n.alive || n.noPull) continue;
+          // Co-op: pull toward the NEAREST player, not always the host —
+          // events are shared now, so everyone should feel the storm.
+          let tx = this.player.x,
+            ty = this.player.y;
+          if (peers) {
+            let best = dist2(n.x, n.y, tx, ty);
+            for (const pp of peers) {
+              if (pp.downed) continue;
+              const d = dist2(n.x, n.y, pp.x, pp.y);
+              if (d < best) {
+                best = d;
+                tx = pp.x;
+                ty = pp.y;
+              }
+            }
+          }
+          const a = Math.atan2(ty - n.y, tx - n.x);
           n.x += Math.cos(a) * pull * dt;
           n.y += Math.sin(a) * pull * dt;
         }
       }
       return; // one event at a time — don't also count down toward the next roll
     }
+    // Co-op: only the host schedules events; everyone else gets them from
+    // the host's "event" broadcast, so the whole room is in BAYAT RUSH
+    // together instead of each player quietly rolling their own.
+    if (this.coop && !Multiplayer.isHost) return;
     this.eventTimer -= dt;
     if (this.eventTimer <= 0) {
       this.eventTimer = rand(CONFIG.events.minGap, CONFIG.events.maxGap);
@@ -2161,11 +2424,32 @@ const Game = {
     }
   },
   rollEvent() {
+    // Co-op joiner (chaos orb, jumpscare outcome, ...): ask the host, who
+    // rolls it and broadcasts it to everyone including us.
+    if (this.coop && !Multiplayer.isHost) {
+      Multiplayer.send("eventRequest", {});
+      return;
+    }
     const def = weightedPick(
       EVENT_POOL.map((e) => ({ item: e, weight: e.weight })),
     );
     if (!def) return;
-    this.activeEvent = { def, t: 0, duration: def.duration };
+    this.startEvent(def, 0);
+    if (this.coop) Multiplayer.send("event", { id: def.id, t: 0 });
+  },
+  mpOnEvent(data) {
+    if (!this.mpRunActive() || Multiplayer.isHost || !data) return;
+    const def = EVENT_POOL.find((e) => e.id === data.id);
+    if (def) this.startEvent(def, data.t || 0);
+  },
+  mpOnEventRequest() {
+    if (!this.mpRunActive() || !Multiplayer.isHost || this.activeEvent) return;
+    this.rollEvent();
+  },
+  // `t` = how far into the event we already are (late joiners). Ends on
+  // its own after def.duration on every client — no end message needed.
+  startEvent(def, t) {
+    this.activeEvent = { def, t: t || 0, duration: def.duration };
     this.eventsTriggeredThisRun.push(def.name);
     if (def.id === "chaosmode") this.checkAchievement("chaosevent");
     this.triggerFlash(def.color, 0.35);
@@ -2184,20 +2468,34 @@ const Game = {
   // proximity trigger, same "no attack button, hugging IS the
   // interaction" philosophy as everything else in this game. Once broken
   // it's just gone (drawDecor() skips d.broken) — no rubble sprite. ----
+  mpOnDecorBreak(data) {
+    if (!this.mpRunActive() || !data || !this.decor) return;
+    const d = this.decor[data.i];
+    if (!d || d.broken) return;
+    d.broken = true;
+    this.particles.burst(d.x, d.y, d.c, 12, { maxSpeed: 140, minLife: 0.3, maxLife: 0.55 });
+  },
   updateDestructibles() {
-    const breakRadius2 = 34 * 34;
-    for (const d of this.decor) {
+    // Rock Smasher buff: break from farther away.
+    const breakR = 34 * (1 + 0.3 * (this.player.rockSmashLevel || 0));
+    const breakRadius2 = breakR * breakR;
+    for (let di = 0; di < this.decor.length; di++) {
+      const d = this.decor[di];
       if (d.broken) continue;
       if (d.kind !== "rock" && d.kind !== "crystal") continue;
       if (dist2(this.player.x, this.player.y, d.x, d.y) > breakRadius2) continue;
       d.broken = true;
+      // Co-op worlds are seeded identically, so an index names the same
+      // rock on every screen. The reward stays with whoever broke it.
+      if (this.coop) Multiplayer.send("decorBreak", { i: di });
       this.particles.burst(d.x, d.y, d.c, 16, {
         maxSpeed: 160,
         minLife: 0.3,
         maxLife: 0.6,
       });
       AudioSystem.slip(); // reuse a short existing impact sound rather than adding a new one
-      const roll = Math.random();
+      // Rock Smasher: never the "nothing" outcome (the last 15% of the roll).
+      const roll = this.player.rockSmashLevel ? Math.random() * 0.85 : Math.random();
       if (roll < 0.45) {
         if (this.mode === "arcade") this.exp.add(8 * this.player.totalExpMult);
         else this.timer = clamp(this.timer + 0.6, 0, this.maxStoredTime);
@@ -2258,11 +2556,14 @@ const Game = {
       this.pickupSpawnTimer <= 0 &&
       this.pickups.length < CONFIG.pickups.maxOnField
     ) {
-      this.pickupSpawnTimer = CONFIG.pickups.spawnInterval * rand(0.7, 1.3);
+      // Sticky Fingers buff: pickups spawn more often.
+      this.pickupSpawnTimer =
+        (CONFIG.pickups.spawnInterval * rand(0.7, 1.3)) / (this.player.pickupRateMult || 1);
       this.spawnPickup();
     }
     const collectRadius =
-      CONFIG.pickups.collectRadius + this.player.magnetLevel * 16;
+      (CONFIG.pickups.collectRadius + this.player.magnetLevel * 16) *
+      (this.player.pickupRadiusMult || 1); // Sticky Fingers
     for (let i = this.pickups.length - 1; i >= 0; i--) {
       const p = this.pickups[i];
       p.bob += dt * 2.4;
@@ -2573,6 +2874,7 @@ const Game = {
   },
 
   applyAutoLevel(times) {
+    const godItems = [];
     for (let i = 0; i < times; i++) {
       const boosts = ["speed", "hug", "exp", "luck"];
       const pick = choice(boosts);
@@ -2580,6 +2882,15 @@ const Game = {
       else if (pick === "hug") this.player.hugRadiusMult += 0.06;
       else if (pick === "exp") this.player.expMult += 0.08;
       else this.player.luckMult += 0.08;
+      godItems.push(
+        pick === "speed"
+          ? { id: "shoes", name: "+5% Speed" }
+          : pick === "hug"
+            ? { id: "bearhug", name: "+6% Hug Radius" }
+            : pick === "exp"
+              ? { id: "amulet", name: "+8% EXP" }
+              : { id: "clover", name: "+8% Luck" },
+      );
       AudioSystem.levelup();
       this.particles.text(
         this.player.x,
@@ -2590,6 +2901,8 @@ const Game = {
       );
       this.camera.shake(5, 0.15);
     }
+    // One GOD popup for the whole batch (a big hug can level you twice).
+    if (CONFIG.god.onArcadeLevel && godItems.length) UI.godPrize({ items: godItems });
   },
 
   queueLevelUps(times) {
@@ -2619,7 +2932,12 @@ const Game = {
       this.state = "playing";
       return;
     }
-    UI.showUpgradeModal("LEVEL UP!", "Choose an upgrade", choices, (def) => {
+    const godUp = CONFIG.god.onLevelUp;
+    UI.showUpgradeModal(
+      godUp ? CONFIG.god.prizeTitle : "LEVEL UP!",
+      godUp ? CONFIG.god.levelUpSub : "Choose an upgrade",
+      choices,
+      (def) => {
       const lvl = this.upgrades.apply(def, this.player);
       UI.hideUpgradeModal();
       this.particles.text(
@@ -2699,7 +3017,13 @@ const Game = {
       return;
     }
     let picks = kindDef.picks || 1;
+    // Treasure Hunter buff: a chance of one extra item from any chest.
+    if (this.player.bonusPickChance && Math.random() < this.player.bonusPickChance) {
+      picks++;
+      this.particles.text(this.player.x, this.player.y - 58, "+1 TREASURE!", "#ffd166", 14);
+    }
     const grants = []; // {name, lvl|null, isSynergy}
+    const grantIds = []; // parallel to grants — lets GOD's popup show each icon
 
     // A synergy is granted at most once per run, and consumes one of the
     // chest's picks — the rest of the picks (if any) still land as normal
@@ -2712,6 +3036,7 @@ const Game = {
     if (synergy && picks > 0) {
       this.grantSynergy(synergy);
       grants.push(synergy.name + " (NEW!)");
+      grantIds.push(synergy.resultTool.id);
       picks--;
     }
 
@@ -2723,6 +3048,7 @@ const Game = {
       const pick = choice(pool);
       const lvl = this.upgrades.apply(pick, this.player);
       grants.push(pick.name + " Lv" + lvl);
+      grantIds.push(pick.id);
       this.particles.text(
         this.player.x,
         this.player.y - 40 - i * 16,
@@ -2747,10 +3073,18 @@ const Game = {
           : chest.kind === "rare"
             ? "\u2726 RARE CHEST! \u2726"
             : "CHEST OPENED";
-      UI.toast(
-        label + "  " + grants.join(", "),
-        chest.kind === "normal" ? 1600 : 2400,
-      );
+      if (CONFIG.god.onChest) {
+        // `grantIds` runs parallel to `grants` so GOD can show each icon
+        UI.godPrize({
+          title: chest.kind === "normal" ? null : CONFIG.god.prizeTitle + "  " + label,
+          items: grants.map((name, i) => ({ id: grantIds[i], name })),
+        });
+      } else {
+        UI.toast(
+          label + "  " + grants.join(", "),
+          chest.kind === "normal" ? 1600 : 2400,
+        );
+      }
     }
   },
   grantCursedItem(chest, cursedPool) {
@@ -2772,7 +3106,11 @@ const Game = {
       minLife: 0.4,
       maxLife: 0.85,
     });
-    UI.toast("☠ CURSED ITEM: " + item.name + " — " + item.desc, 3600);
+    if (CONFIG.god.onCursed) {
+      UI.godPrize({ curse: true, items: [{ id: item.icon, name: item.name + " — " + item.desc }] });
+    } else {
+      UI.toast("☠ CURSED ITEM: " + item.name + " — " + item.desc, 3600);
+    }
     AudioSystem.danger();
   },
   grantSynergy(synergy) {
@@ -2806,7 +3144,11 @@ const Game = {
       maxLife: 0.85,
     });
     this.camera.shake(11, 0.3);
-    UI.toast("\u2666 SYNERGY: " + synergy.name.toUpperCase() + " \u2666", 3200);
+    if (CONFIG.god.onSynergy) {
+      UI.godPrize({ items: [{ id: synergy.resultTool.id, name: "SYNERGY: " + synergy.name }] });
+    } else {
+      UI.toast("\u2666 SYNERGY: " + synergy.name.toUpperCase() + " \u2666", 3200);
+    }
     this.particles.text(
       this.player.x,
       this.player.y - 56,
@@ -2847,7 +3189,10 @@ const Game = {
     const dx = this.player.x - n.x,
       dy = this.player.y - n.y;
     const d = Math.sqrt(dx * dx + dy * dy) || 0.001;
-    const cosHalf = Math.cos(((cfg.frontArcDegrees / 2) * Math.PI) / 180);
+    // Goomba Boots buff shrinks the arc; at max level it's gone entirely.
+    const arc = cfg.frontArcDegrees * (this.player.nasserArcMult ?? 1);
+    if (arc <= 0) return false;
+    const cosHalf = Math.cos(((arc / 2) * Math.PI) / 180);
     if ((dx * fx + dy * fy) / d < cosHalf) return false; // behind / side: hug
     // Still in front but already bumped this contact: no hug either, or a
     // head-on approach would bounce once and then hug on the next frame.
@@ -2859,6 +3204,7 @@ const Game = {
     this.player.lungeVX = (dx / d) * kb;
     this.player.lungeVY = (dy / d) * kb;
     this.nasserBumpsThisRun++;
+    this.nasserHugStreak = 0; // "Sneak Attack" achievement resets on a bump
     if (bull) {
       const dealt =
         cfg.bulldozerTimeLoss *
@@ -2880,6 +3226,28 @@ const Game = {
     return true;
   },
 
+  /* Nasser achievements. Formation/corner state only exists where the
+     patrol is simulated (solo / host) — a co-op joiner's puppets don't
+     carry it, so those two can only be earned there. */
+  onNasserHug(bayat) {
+    const type = bayat.type;
+    this.nasserHugStreak = (this.nasserHugStreak || 0) + 1;
+    if (this.nasserHugStreak >= 10) this.checkAchievement("nasser10");
+    if (type.key === "grand") this.checkAchievement("grandnasser");
+    if (type.patrolTurn && bayat.cornerAt && performance.now() - bayat.cornerAt < 350) {
+      this.checkAchievement("turnercorner");
+    }
+    const f = bayat.formation;
+    if (f) {
+      // Count members hugged while the combo is unbroken: a gap longer
+      // than the combo window between two members restarts the count.
+      const win = CONFIG.combo.window + (this.player.comboWindowBonus || 0);
+      if (f.lastHugAt == null || this.elapsed - f.lastHugAt > win) f.hugged = 0;
+      f.hugged = (f.hugged || 0) + 1;
+      f.lastHugAt = this.elapsed;
+      if (f.hugged >= f.members.length) this.checkAchievement("nasserline");
+    }
+  },
   applyStickyArms(dt) {
     if (this.player.stickyArmsLevel <= 0) return;
     const range = this.player.hugRadius * 1.5;
@@ -2934,6 +3302,30 @@ const Game = {
     );
   },
 
+  /* One entry point for lingering ground zones. A zone re-applies its
+     effect every frame, which the per-cast bayatEffect diff can't relay
+     without flooding the connection — so in co-op a joiner sends the
+     ZONE itself to the host (fxZone), and the host runs it against the
+     real simulation. (Glitter Cloud was silently inert for joiners
+     before this.) */
+  addFxZone(z) {
+    this.fxZones.push(z);
+    if (this.coop && !Multiplayer.isHost) {
+      Multiplayer.send("fxZone", {
+        x: Math.round(z.x), y: Math.round(z.y), r: Math.round(z.r),
+        color: z.color, t: z.t, slow: !!z.slow, pull: z.pull || 0,
+      });
+    }
+  },
+  mpOnFxZone(data) {
+    if (!this.mpRunActive() || !Multiplayer.isHost || !data) return;
+    const t = clamp(+data.t || 0, 0, 12);
+    this.fxZones.push({
+      x: +data.x, y: +data.y, r: clamp(+data.r || 0, 0, 600),
+      color: typeof data.color === "string" ? data.color : "#c9a0ff",
+      t, maxT: t, slow: !!data.slow, pull: clamp(+data.pull || 0, 0, 300),
+    });
+  },
   updateFxZones(dt) {
     for (let i = this.fxZones.length - 1; i >= 0; i--) {
       const z = this.fxZones[i];
@@ -2942,10 +3334,22 @@ const Game = {
         this.fxZones.splice(i, 1);
         continue;
       }
-      if (z.slow) {
+      if (z.slow || z.pull) {
         const targets = this.bayats.inRadius(z.x, z.y, z.r);
+        // Pull moves positions directly, so only whoever owns the sim
+        // does it (on a joiner the host's snapshot would undo it anyway).
+        const canMove = !this.coop || Multiplayer.isHost;
         for (const n of targets) {
-          n.slowT = Math.max(n.slowT, 0.25);
+          if (z.slow) n.slowT = Math.max(n.slowT, 0.25);
+          if (z.pull && canMove && !n.noPull) {
+            const dx = z.x - n.x,
+              dy = z.y - n.y;
+            const d = Math.sqrt(dx * dx + dy * dy);
+            if (d > 6) {
+              n.x += (dx / d) * z.pull * dt;
+              n.y += (dy / d) * z.pull * dt;
+            }
+          }
         }
       }
     }
@@ -2984,10 +3388,11 @@ const Game = {
       if (met) {
         this.evolvedSet[evo.id] = true;
         AudioSystem.evolution();
-        UI.toast(
-          "\u2666 EVOLUTION: " + evo.name.toUpperCase() + " \u2666",
-          3000,
-        );
+        if (CONFIG.god.onEvolution) {
+          UI.godPrize({ items: [{ id: evo.id, name: "EVOLUTION: " + evo.name }] });
+        } else {
+          UI.toast("\u2666 EVOLUTION: " + evo.name.toUpperCase() + " \u2666", 3000);
+        }
         this.particles.text(
           this.player.x,
           this.player.y - 56,
@@ -3093,6 +3498,8 @@ const Game = {
       this.updateShockwaves(dt);
       this.updateEnemyProjectiles(dt);
       if (this.screenFlashT > 0) this.screenFlashT -= dt;
+      // Our hitstop/jumpscare is personal — the shared world keeps going.
+      if (this.coop) this.mpBackgroundTick(dt);
       return;
     }
     this.updateJumpscareRoll(dt);
@@ -3194,9 +3601,22 @@ const Game = {
       this.combo > 0 &&
       this.elapsed - this.lastHugTime >
         CONFIG.combo.window + (this.player.comboWindowBonus || 0)
-    )
-      this.combo = 0;
+    ) {
+      // Steady Hands: keep part of the combo and give it a fresh window,
+      // so it steps down (20 -> 12 -> 7 ...) instead of falling off a cliff.
+      const kept = Math.floor(this.combo * (this.player.comboRetain || 0));
+      this.combo = kept;
+      if (kept > 0) this.lastHugTime = this.elapsed;
+    }
 
+    // Delayed tool payloads (Time Bomb, Care Package, Bear Trap, Big
+    // Bang...) fire HERE, outside the tools.update() relay window — so a
+    // joiner's delayed effects used to never reach the host at all. Give
+    // them their own capture/relay. One-shot effects, so no steady traffic.
+    const ccDelayed =
+      this.coop && !Multiplayer.isHost && this.delayedEffects.some((e) => e.t - dt <= 0)
+        ? this.mpCaptureBayatCC()
+        : null;
     for (let i = this.delayedEffects.length - 1; i >= 0; i--) {
       const e = this.delayedEffects[i];
       e.t -= dt;
@@ -3205,6 +3625,7 @@ const Game = {
         this.delayedEffects.splice(i, 1);
       }
     }
+    if (ccDelayed) this.mpSendBayatEffects(ccDelayed);
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const p = this.projectiles[i];
       p.t += dt;
@@ -3427,9 +3848,8 @@ const Game = {
         ctx.stroke();
         ctx.restore();
       } else if (p.kind === "missile") {
-        const target = this.bayats.list.find(
-          (n) => n.id === p.targetId && n.alive,
-        );
+        const hit = this.bayats.byId(p.targetId);
+        const target = hit && hit.alive ? hit : null;
         const tx = target ? target.x : p.x,
           ty = target ? target.y : p.y;
         const wx = lerp(p.x, tx, frac),
@@ -3546,6 +3966,7 @@ const Game = {
 
     if (this.coop) {
       for (const id in this.mpPeers) drawRemotePlayer(ctx, cam, this.mpPeers[id]);
+      drawTeammateArrows(ctx, cam, this.mpPeers);
     }
     if (this.player) this.player.draw(ctx, cam);
     if (this.tools) {
@@ -3673,6 +4094,8 @@ const Game = {
       const dt = Math.min(0.05, (ts - this.lastFrame) / 1000 || 0);
       this.lastFrame = ts;
       if (this.state === "playing") this.update(dt);
+      else if (this.coop && (this.state === "paused" || this.state === "levelup"))
+        this.mpBackgroundTick(dt); // see mpBackgroundTick()
       if (
         this.state === "playing" ||
         this.state === "paused" ||

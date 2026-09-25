@@ -142,7 +142,7 @@ class ToolSystem {
         const chainCount = CONFIG.tesla.chainCount + Math.floor(t.level / 2);
         const pool = nm
           .inRadius(player.x, player.y, range)
-          .filter((n) => !n.type.danger);
+          .filter((n) => !n.noPull);
         const chain = [];
         const poolCopy = pool.slice();
         while (chain.length < chainCount && poolCopy.length) {
@@ -166,13 +166,37 @@ class ToolSystem {
         }
         if (chain.length) AudioSystem.toolFire();
       }
+    } else if (t.def.id === "lullaby") {
+      // Screen-wide, periodic: every Bayat currently on screen gets
+      // drowsy (slowed) — or, with the Deep Sleep evolution, frozen solid.
+      // Bounds come from the camera, like Firecracker, not a radius.
+      t.timer = (t.timer || 0) - dt;
+      if (t.timer <= 0) {
+        t.timer = Math.max(3.5, t.def.tickInterval - t.level * 0.4);
+        const cam = Game.camera;
+        const deep = Game.evolvedSet && Game.evolvedSet.deepSleep;
+        let hit = 0;
+        for (const n of nm.list) {
+          if (!n.alive) continue;
+          if (n.x < cam.x || n.x > cam.x + cam.w || n.y < cam.y || n.y > cam.y + cam.h) continue;
+          if (deep) n.frozenT = Math.max(n.frozenT, 1.0 + t.level * 0.12);
+          else n.slowT = Math.max(n.slowT, 1.4 + t.level * 0.25);
+          hit++;
+          if (Math.random() < 0.35)
+            Game.particles.text(n.x, n.y - n.radius - 6, "z", "#c9b3ff", 11);
+        }
+        if (hit) {
+          Game.particles.text(player.x, player.y - 44, deep ? "DEEP SLEEP" : "LULLABY", "#c9b3ff", 14);
+          AudioSystem.toolFire();
+        }
+      }
     } else if (t.def.id === "gravitywell") {
       // Synergy result (Black Hole + Vacuum): a permanent, always-on strong
       // pull — non-dangerous Bayats get a steady stream of near-guaranteed
       // catches, dangerous ones get firmly shoved back out.
       const targets = nm.inRadius(player.x, player.y, range);
       for (const n of targets) {
-        if (!n.type.danger) {
+        if (!n.noPull) {
           n.hookedT = Math.max(n.hookedT, 0.3);
         } else {
           const a = Math.atan2(n.y - player.y, n.x - player.x);
@@ -241,7 +265,7 @@ class ToolSystem {
         const maxTargets = t.def.targets ? t.def.targets(t.level) : 1;
         const targets = nm
           .inRadius(player.x, player.y, range)
-          .filter((n) => !n.type.danger)
+          .filter((n) => !n.noPull)
           .slice(0, maxTargets);
         for (const target of targets) {
           target.hookedT = 0.45;
@@ -256,7 +280,7 @@ class ToolSystem {
       case "cake": {
         const targets = nm
           .inRadius(player.x, player.y, range)
-          .filter((n) => !n.type.danger);
+          .filter((n) => !n.noPull);
         for (const n of targets) {
           n.hookedT = Math.max(n.hookedT, 0.32);
         }
@@ -279,7 +303,7 @@ class ToolSystem {
       case "rope": {
         const targets = nm
           .inRadius(player.x, player.y, range)
-          .filter((n) => !n.type.danger);
+          .filter((n) => !n.noPull);
         for (const n of targets) {
           n.hookedT = Math.max(n.hookedT, 0.5);
           drawRopeLine(player, n, "#c8a06a");
@@ -294,7 +318,7 @@ class ToolSystem {
         const targets = nm.inRadius(player.x, player.y, range);
         for (const n of targets) {
           n.slowT = Math.max(n.slowT, 1.1);
-          if (!n.type.danger) n.hookedT = Math.max(n.hookedT, 0.22);
+          if (!n.noPull) n.hookedT = Math.max(n.hookedT, 0.22);
         }
         Game.particles.burst(player.x, player.y, "#a970ff", 26, {
           maxSpeed: 160,
@@ -335,7 +359,7 @@ class ToolSystem {
       }
       case "snowball": {
         const target = nm.densestCluster(player.x, player.y, 900) ||
-          nm.nearest(player.x, player.y, (n) => !n.type.danger) || {
+          nm.nearest(player.x, player.y, (n) => !n.noPull) || {
             x: player.x,
             y: player.y + 150,
           };
@@ -361,7 +385,7 @@ class ToolSystem {
         const maxT = 3 + t.level * 2;
         const targets = nm
           .inRadius(player.x, player.y, range)
-          .filter((n) => !n.type.danger)
+          .filter((n) => !n.noPull)
           .slice(0, maxT);
         for (const n of targets) {
           n.hookedT = Math.max(n.hookedT, 0.5 + t.level * 0.05);
@@ -387,7 +411,7 @@ class ToolSystem {
       case "magnet": {
         const targets = nm.inRadius(player.x, player.y, range);
         for (const n of targets) {
-          if (!n.type.danger)
+          if (!n.noPull)
             n.hookedT = Math.max(n.hookedT, 0.6 + t.level * 0.08);
           else n.slowT = Math.max(n.slowT, 0.4);
         }
@@ -426,7 +450,7 @@ class ToolSystem {
             const maxT = 2 + t.level;
             const targets = nm
               .inRadius(player.x, player.y, range * 0.65)
-              .filter((n) => !n.type.danger)
+              .filter((n) => !n.noPull)
               .slice(0, maxT);
             for (const n of targets) {
               n.hookedT = Math.max(n.hookedT, 0.5);
@@ -462,7 +486,7 @@ class ToolSystem {
       case "banana": {
         const targets = nm
           .inRadius(player.x, player.y, range)
-          .filter((n) => !n.type.danger);
+          .filter((n) => !n.noPull);
         for (const n of targets) {
           n.slowT = Math.max(n.slowT, 1.2);
           n.hookedT = Math.max(n.hookedT, 0.15 + t.level * 0.03);
@@ -530,7 +554,7 @@ class ToolSystem {
       case "confetti": {
         const dest =
           nm.densestCluster(player.x, player.y, range) ||
-          nm.nearest(player.x, player.y, (n) => !n.type.danger);
+          nm.nearest(player.x, player.y, (n) => !n.noPull);
         if (!dest) break;
         const tx = dest.x,
           ty = dest.y;
@@ -551,7 +575,7 @@ class ToolSystem {
             const blastR = (110 + t.level * 16) * (inferno ? 1.5 : 1);
             const hitTargets = nm
               .inRadius(tx, ty, blastR)
-              .filter((n) => !n.type.danger);
+              .filter((n) => !n.noPull);
             for (const n of hitTargets) {
               n.hookedT = Math.max(n.hookedT, 0.4);
             }
@@ -579,7 +603,7 @@ class ToolSystem {
         const maxTargets = t.def.targets ? t.def.targets(t.level) : 1;
         const pool = nm
           .inRadius(player.x, player.y, range)
-          .filter((n) => !n.type.danger);
+          .filter((n) => !n.noPull);
         const thunder = Game.evolvedSet && Game.evolvedSet.thunderstorm;
         const total = Math.min(pool.length, maxTargets + (thunder ? 2 : 0));
         for (let i = 0; i < total; i++) {
@@ -600,7 +624,7 @@ class ToolSystem {
         break;
       }
       case "heartmissile": {
-        const target = nm.nearest(player.x, player.y, (n) => !n.type.danger);
+        const target = nm.nearest(player.x, player.y, (n) => !n.noPull);
         if (!target) break;
         const d = dist(player.x, player.y, target.x, target.y);
         const travel =
@@ -673,7 +697,7 @@ class ToolSystem {
           x: player.x,
           y: player.y,
         };
-        Game.fxZones.push({
+        Game.addFxZone({
           x: dest.x,
           y: dest.y,
           r: 100 + t.level * 14,
@@ -705,7 +729,7 @@ class ToolSystem {
         const dur = 1.4 + t.level * 0.3;
         const targets = nm
           .inRadius(player.x, player.y, range)
-          .filter((n) => !n.type.danger);
+          .filter((n) => !n.noPull);
         for (const n of targets) {
           n.anchorT = dur;
           n.anchorX = dropX;
@@ -740,7 +764,7 @@ class ToolSystem {
         const targets = nm.inRadius(player.x, player.y, range);
         for (const n of targets) {
           n.frozenT = Math.max(n.frozenT, 1.7);
-          if (!n.type.danger) n.hookedT = Math.max(n.hookedT, 0.3);
+          if (!n.noPull) n.hookedT = Math.max(n.hookedT, 0.3);
         }
         Game.particles.burst(player.x, player.y, "#bfe9ff", 32, {
           maxSpeed: 150,
@@ -762,7 +786,7 @@ class ToolSystem {
         // Synergy result (Static Cling + Ring of Magic): instant zaps + a huge pull/slow pulse
         const pool = nm
           .inRadius(player.x, player.y, range)
-          .filter((n) => !n.type.danger);
+          .filter((n) => !n.noPull);
         const zapCount = Math.min(pool.length, 4);
         for (let i = 0; i < zapCount; i++) {
           const idx = randInt(0, pool.length - 1);
@@ -814,7 +838,7 @@ class ToolSystem {
             const targets = nm.inRadius(player.x, player.y, range);
             for (const n of targets) {
               n.frozenT = Math.max(n.frozenT, 1.6);
-              if (!n.type.danger) n.hookedT = Math.max(n.hookedT, 0.4);
+              if (!n.noPull) n.hookedT = Math.max(n.hookedT, 0.4);
             }
             Game.particles.burst(player.x, player.y, "#ff9dc9", 50, {
               maxSpeed: 280,
@@ -844,7 +868,7 @@ class ToolSystem {
         // Pierces every non-danger Bayat in a narrow cone aimed at the
         // nearest one — the only tool that hits a LINE of targets instead
         // of a radius around the player or a single picked point.
-        const aimTarget = nm.nearest(player.x, player.y, (n) => !n.type.danger);
+        const aimTarget = nm.nearest(player.x, player.y, (n) => !n.noPull);
         if (!aimTarget) break;
         const angle = Math.atan2(
           aimTarget.y - player.y,
@@ -852,7 +876,7 @@ class ToolSystem {
         );
         const coneHalfAngle = 0.22; // ~12.6 degrees either side
         const targets = nm.list.filter((n) => {
-          if (!n.alive || n.type.danger) return false;
+          if (!n.alive || n.noPull) return false;
           if (dist(player.x, player.y, n.x, n.y) > range) return false;
           let diff = Math.abs(Math.atan2(n.y - player.y, n.x - player.x) - angle);
           if (diff > Math.PI) diff = TAU - diff;
@@ -882,7 +906,7 @@ class ToolSystem {
         const pool = nm.list.filter(
           (n) =>
             n.alive &&
-            !n.type.danger &&
+            !n.noPull &&
             n.x > cam.x - 40 &&
             n.x < cam.x + cam.w + 40 &&
             n.y > cam.y - 40 &&
@@ -913,7 +937,7 @@ class ToolSystem {
         const poolCopy = nm.list.filter(
           (n) =>
             n.alive &&
-            !n.type.danger &&
+            !n.noPull &&
             dist(player.x, player.y, n.x, n.y) <= range,
         );
         const chosen = [];
@@ -958,7 +982,7 @@ class ToolSystem {
         let best = null,
           bd = -1;
         for (const n of nm.list) {
-          if (!n.alive || n.type.danger) continue;
+          if (!n.alive || n.noPull) continue;
           const d = dist(player.x, player.y, n.x, n.y);
           if (d <= range && d > bd) {
             bd = d;
@@ -970,6 +994,96 @@ class ToolSystem {
         drawRopeLine(player, best, "#ff7ab8");
         Game.particles.burst(best.x, best.y, "#ff7ab8", 14, { maxSpeed: 140 });
         AudioSystem.toolFire();
+        break;
+      }
+      case "whistle": {
+        // TWEET — everything around you stops dead. The only tool that
+        // stuns (stunT) rather than slowing/freezing/pulling, so Bayats
+        // skid to a halt with a little momentum instead of freezing mid-air.
+        const targets = nm.inRadius(player.x, player.y, range);
+        for (const n of targets) {
+          n.stunT = Math.max(n.stunT, 0.8 + t.level * 0.12);
+          n.vx *= 0.3;
+          n.vy *= 0.3;
+        }
+        Game.telegraphs.push({ x: player.x, y: player.y, r: range, color: "#ffd166", t: 0.35, maxT: 0.35 });
+        Game.particles.text(player.x, player.y - 44, "TWEET!", "#ffd166", 16);
+        Game.camera.shake(4, 0.12);
+        if (targets.length) AudioSystem.toolFire();
+        break;
+      }
+      case "lasso": {
+        // Targets by SPEED: the fastest things in range are exactly what
+        // every other tool struggles to catch (Runners, Golden, Fast).
+        const count =
+          t.def.targets(t.level) * (Game.evolvedSet && Game.evolvedSet.grandLasso ? 2 : 1);
+        const targets = nm
+          .inRadius(player.x, player.y, range)
+          .filter((n) => !n.noPull)
+          .sort((a, b) => b.effectiveSpeed - a.effectiveSpeed)
+          .slice(0, count);
+        for (const n of targets) {
+          n.hookedT = Math.max(n.hookedT, 0.55);
+          drawRopeLine(player, n, "#c8a06a");
+          Game.particles.burst(n.x, n.y, "#c8a06a", 8, { maxSpeed: 90 });
+        }
+        if (targets.length) AudioSystem.toolFire();
+        break;
+      }
+      case "honeypot": {
+        const dest = nm.densestCluster(player.x, player.y, range) || { x: player.x, y: player.y };
+        Game.addFxZone({
+          x: dest.x,
+          y: dest.y,
+          r: t.def.zoneRadius(t.level),
+          color: "#f5b942",
+          t: t.def.zoneDuration(t.level),
+          maxT: t.def.zoneDuration(t.level),
+          slow: true,
+          pull: CONFIG.honeypot.pullSpeed,
+        });
+        Game.particles.burst(dest.x, dest.y, "#f5b942", 22, { maxSpeed: 80, minLife: 0.5, maxLife: 0.9 });
+        AudioSystem.toolFire();
+        break;
+      }
+      case "beartrap": {
+        // Set at your feet (not thrown) — you lure things onto it.
+        const tx = player.x,
+          ty = player.y;
+        Game.telegraphs.push({ x: tx, y: ty, r: range, color: "#8a9ec9", t: t.def.telegraphTime, maxT: t.def.telegraphTime });
+        Game.delayedEffects.push({
+          t: t.def.telegraphTime,
+          fn: () => {
+            for (const n of nm.inRadius(tx, ty, range)) {
+              n.stunT = Math.max(n.stunT, 1.4 + t.level * 0.2);
+              if (!n.noPull) n.hookedT = Math.max(n.hookedT, 0.3);
+            }
+            Game.shockwaves.push({ x: tx, y: ty, color: "#dfe6f5", t: 0, duration: 0.3, maxR: range });
+            Game.particles.text(tx, ty - 30, "SNAP!", "#dfe6f5", 16);
+            Game.camera.shake(7, 0.18);
+            AudioSystem.toolFire();
+          },
+        });
+        break;
+      }
+      case "treatbag": {
+        // Targets by VALUE: whichever Bayat in range is worth the most.
+        let best = null,
+          bestV = -1;
+        for (const n of nm.inRadius(player.x, player.y, range)) {
+          if (n.noPull || (n.type.ghostType && n.ghostPhased)) continue;
+          const v = (n.type.rewardMult || 1) * (n.type.expMult || 1) + (n.type.miniBoss ? 3 : 0);
+          if (v > bestV) {
+            bestV = v;
+            best = n;
+          }
+        }
+        if (best) {
+          best.hookedT = Math.max(best.hookedT, 0.9);
+          drawRopeLine(player, best, "#6fe3a3");
+          Game.particles.text(best.x, best.y - best.radius - 10, "TREAT!", "#6fe3a3", 13);
+          AudioSystem.toolFire();
+        }
         break;
       }
       case "timebomb": {
@@ -1002,7 +1116,7 @@ class ToolSystem {
           fn: () => {
             const targets = nm.inRadius(tx, ty, range);
             for (const n of targets) {
-              if (n.type.danger) {
+              if (n.noPull) {
                 const a = Math.atan2(n.y - ty, n.x - tx);
                 n.x += Math.cos(a) * 150;
                 n.y += Math.sin(a) * 150;

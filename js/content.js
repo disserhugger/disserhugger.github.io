@@ -552,6 +552,7 @@ const BAYAT_TYPES = {
     legMult: 1.1,
     patrolSpeedMult: 1.1,
     bulldozer: true, // the real Goomba: safe from behind, OUCH head-on
+    pullImmune: true, // the dangerous Disser: no tool ever pulls it (Bayat.noPull)
     expMult: 2,
     rewardMult: 2,
     weightBase: 4,
@@ -971,6 +972,82 @@ const STAT_UPGRADES = [
       p.boldHugsRadiusMult = 1 - 0.05 * l;
     },
   },
+
+  /* ---- big content pass: each one leans on a system that had no buff
+     of its own yet (combo speed, combo decay, Nassers, pickups, decor,
+     chests). Read sites are named in each comment. ---- */
+  {
+    // Player.speed getter: +perCombo*l per combo step, capped
+    id: "momentum",
+    name: "Momentum",
+    icon: "💨",
+    maxLevel: 5,
+    desc: (l) =>
+      `+${Math.round(CONFIG.momentum.perCombo * 100 * l)}% speed per combo step (max +${Math.round(CONFIG.momentum.capPerLevel * 100 * l)}%)`,
+    apply: (p, l) => {
+      p.momentumLevel = l;
+    },
+  },
+  {
+    // Game.update() combo decay: keeps a fraction of the combo and
+    // restarts the window instead of dropping straight to 0
+    id: "steadyhands",
+    name: "Steady Hands",
+    icon: "✋",
+    maxLevel: 4,
+    desc: (l) => `When your combo runs out, keep ${15 * l}% of it instead of losing it all`,
+    apply: (p, l) => {
+      p.comboRetain = 0.15 * l;
+    },
+  },
+  {
+    // Game.nasserHeadOn(): shrinks the front arc; max level = no bumps
+    id: "goombaboots",
+    name: "Goomba Boots",
+    icon: "🥾",
+    maxLevel: 3,
+    desc: (l) =>
+      l >= 3
+        ? "Nassers can never bump you head-on"
+        : `Nassers' head-on bump zone is ${Math.round((l / 3) * 100)}% smaller`,
+    apply: (p, l) => {
+      p.nasserArcMult = Math.max(0, 1 - l / 3);
+    },
+  },
+  {
+    // Game.updatePickups(): collect radius + spawn interval
+    id: "stickyfingers",
+    name: "Sticky Fingers",
+    icon: "🧤",
+    maxLevel: 4,
+    desc: (l) => `+${30 * l}% pickup grab range, world pickups spawn ${12 * l}% more often`,
+    apply: (p, l) => {
+      p.pickupRadiusMult = 1 + 0.3 * l;
+      p.pickupRateMult = 1 + 0.12 * l;
+    },
+  },
+  {
+    // Game.updateDestructibles(): bigger break radius, never "nothing"
+    id: "rocksmasher",
+    name: "Rock Smasher",
+    icon: "🔨",
+    maxLevel: 3,
+    desc: (l) => `Break rocks & crystals from ${30 * l}% farther, and they always drop something`,
+    apply: (p, l) => {
+      p.rockSmashLevel = l;
+    },
+  },
+  {
+    // Game.onChestOpened(): chance of one extra pick
+    id: "treasurehunter",
+    name: "Treasure Hunter",
+    icon: "🗝️",
+    maxLevel: 4,
+    desc: (l) => `${18 * l}% chance for every chest to give one extra item`,
+    apply: (p, l) => {
+      p.bonusPickChance = 0.18 * l;
+    },
+  },
 ];
 
 const TOOL_DEFS = [
@@ -1289,10 +1366,78 @@ const TOOL_DEFS = [
     range: (l) => CONFIG.timebomb.explosionRadius + l * 20,
     telegraphTime: CONFIG.timebomb.fuseDuration,
   },
+
+  /* ---- big content pass: six tools, each picking targets (or timing)
+     a way nothing else does. All built from the existing stun / hook /
+     slow / freeze / anchor primitives, so they also work for co-op
+     joiners through the bayatEffect relay. ---- */
+  {
+    id: "whistle",
+    name: "Referee Whistle",
+    icon: "📣",
+    maxLevel: 5,
+    baseCooldown: 7.5,
+    desc: (l) => `TWEET! Stuns every Bayat around you for ${(0.8 + 0.12 * l).toFixed(1)}s — they stop dead.`,
+    range: (l) => 190 + l * 28,
+  },
+  {
+    id: "lasso",
+    name: "Lasso",
+    icon: "🪢",
+    maxLevel: 5,
+    baseCooldown: 5.0,
+    desc: (l) => `Ropes in the ${1 + Math.floor(l / 2)} FASTEST Bayat(s) in range — built for Runners and Golden ones.`,
+    range: (l) => 420 + l * 50,
+    targets: (l) => 1 + Math.floor(l / 2),
+  },
+  {
+    id: "honeypot",
+    name: "Honey Pot",
+    icon: "🍯",
+    maxLevel: 5,
+    baseCooldown: 9.0,
+    kind: "zone",
+    desc: (l) => `Drops a sticky pool on the biggest crowd — slows and slowly drags Bayats to its centre.`,
+    range: (l) => 380 + l * 30,
+    zoneRadius: (l) => 90 + l * 12,
+    zoneDuration: (l) => 3.5 + l * 0.6,
+  },
+  {
+    id: "lullaby",
+    name: "Lullaby",
+    icon: "🎵",
+    maxLevel: 5,
+    kind: "aura",
+    tickInterval: CONFIG.lullaby.tickInterval,
+    desc: (l) => `Every few seconds, EVERY Bayat on screen gets drowsy (slowed ${(1.4 + 0.25 * l).toFixed(1)}s).`,
+    // Screen-wide, like Firecracker — range() exists only because tickAura
+    // computes it for every aura (see CLAUDE.md bug history #9).
+    range: () => 2400,
+  },
+  {
+    id: "beartrap",
+    name: "Bear Trap",
+    icon: "🪤",
+    maxLevel: 5,
+    baseCooldown: 8.0,
+    kind: "telegraph",
+    desc: (l) => `Sets a trap at your feet that snaps shut, stunning and yanking in everything nearby for ${(1.4 + 0.2 * l).toFixed(1)}s.`,
+    range: (l) => CONFIG.beartrap.baseRadius + l * 15,
+    telegraphTime: CONFIG.beartrap.fuseDuration,
+  },
+  {
+    id: "treatbag",
+    name: "Treat Bag",
+    icon: "🍬",
+    maxLevel: 5,
+    baseCooldown: 6.5,
+    desc: (l) => `Lures the most VALUABLE Bayat in range straight to you (Golden, Diamond, mini-bosses first).`,
+    range: (l) => 650 + l * 70,
+  },
 ];
 
 /* Pixel-art icon sprite sheet lookup: id -> [col,row] cell in assets/icons.png
-   (8 columns x 9 rows, 48px cells). Falls back to the def's emoji if an id
+   (8 columns x 11 rows, 48px cells). Falls back to the def's emoji if an id
    isn't in the sheet, so nothing ever renders blank. */
 const ICON_SPRITE = {
   shoes: [0, 0],
@@ -1357,6 +1502,27 @@ const ICON_SPRITE = {
   cupid: [3, 7],
   tesla: [4, 7],
   timebomb: [5, 7],
+  // big content pass (gen_icons.py appends; order = cell)
+  momentum: [6, 7],
+  steadyhands: [7, 7],
+  goombaboots: [0, 8],
+  stickyfingers: [1, 8],
+  rocksmasher: [2, 8],
+  treasurehunter: [3, 8],
+  whistle: [4, 8],
+  lasso: [5, 8],
+  honeypot: [6, 8],
+  lullaby: [7, 8],
+  beartrap: [0, 9],
+  treatbag: [1, 9],
+  // UI icons — menu buttons, achievement fallback (never in-world)
+  ui_play: [2, 9],
+  ui_map: [3, 9],
+  ui_trophy: [4, 9],
+  ui_coop: [5, 9],
+  ui_book: [6, 9],
+  ui_gear: [7, 9],
+  nasser: [0, 10],
 };
 function iconHTML(id, sizePx, fallbackEmoji) {
   const cell = ICON_SPRITE[id];
@@ -1364,7 +1530,7 @@ function iconHTML(id, sizePx, fallbackEmoji) {
     return `<span style="font-size:${sizePx}px;line-height:1;">${fallbackEmoji || "\u2726"}</span>`;
   const cellSize = 48;
   const scale = sizePx / cellSize;
-  return `<div class="pixel-icon" style="width:${sizePx}px;height:${sizePx}px;background-position:-${cell[0] * cellSize * scale}px -${cell[1] * cellSize * scale}px;background-size:${384 * scale}px ${432 * scale}px;"></div>`;
+  return `<div class="pixel-icon" style="width:${sizePx}px;height:${sizePx}px;background-position:-${cell[0] * cellSize * scale}px -${cell[1] * cellSize * scale}px;background-size:${384 * scale}px ${528 * scale}px;"></div>`;
 }
 
 /* =========================================================
@@ -1424,6 +1590,27 @@ const EVOLUTIONS = [
       { id: "longarms", minLevel: 3 },
     ],
     desc: "Static Cling zaps 2 extra Bayats per cast.",
+  },
+  // ---- big content pass ----
+  {
+    id: "grandLasso",
+    name: "Grand Lasso",
+    icon: "🤠",
+    parts: [
+      { id: "lasso", minLevel: 3 },
+      { id: "longarms", minLevel: 3 },
+    ],
+    desc: "Lasso ropes in twice as many Bayats.",
+  },
+  {
+    id: "deepSleep",
+    name: "Deep Sleep",
+    icon: "💤",
+    parts: [
+      { id: "lullaby", minLevel: 3 },
+      { id: "steadyhands", minLevel: 3 },
+    ],
+    desc: "Lullaby puts everything on screen fully to sleep (frozen) instead of just drowsy.",
   },
 ];
 
@@ -1894,6 +2081,11 @@ const ACHIEVEMENTS = [
   { id: "allarenas", name: "Bayat Collector", desc: "Unlock every arena.", icon: "clover" },
   { id: "guardiansave", name: "So Close", desc: "Get saved by Guardian Hug.", icon: "guardianhug" },
   { id: "downedrevive", name: "I've Got You", desc: "Revive a downed teammate in co-op.", icon: "adrenaline" },
+  // Nassers (see Game.onNasserHug)
+  { id: "nasserline", name: "Conga Line", desc: "Hug an entire Nasser Line without dropping your combo.", icon: "nasser" },
+  { id: "nasser10", name: "Sneak Attack", desc: "Hug 10 Nassers in a run without a single head-on bump.", icon: "goombaboots" },
+  { id: "grandnasser", name: "Grand Slam", desc: "Catch the Grand Nasser.", icon: "nasser" },
+  { id: "turnercorner", name: "Corner Kick", desc: "Hug a Turner Nasser right as it turns a corner.", icon: "nasser" },
 ];
 
 /* =========================================================

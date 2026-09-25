@@ -526,7 +526,7 @@ h1.game-title .accent {
   image-rendering: pixelated;
   background-image: url("../assets/icons.png");
   background-repeat: no-repeat;
-  background-size: 384px 432px; /* 8 cols x 9 rows @ 48px */
+  background-size: 384px 528px; /* 8 cols x 11 rows @ 48px — keep = gen_icons.py ROWS*48 */
   flex-shrink: 0;
 }
 
@@ -931,6 +931,114 @@ body.compact-hud #menu-fab {
 #upgrade-modal.show {
   display: block;
 }
+/* ---------- GOD, the prize giver ----------
+   Pixel-art discipline: the pop-in is a 3-frame steps() animation, never
+   a smooth ease, and the sprite is drawn pixelated. */
+.god-sprite {
+  image-rendering: pixelated;
+}
+.god-sprite.missing {
+  display: none; /* no image? the popup still works, just text */
+}
+.um-god {
+  display: block;
+  width: 112px;
+  height: 112px;
+  margin: 0 auto 4px;
+  object-fit: contain;
+  animation: godBob 1.2s steps(2) infinite;
+}
+@keyframes godBob {
+  50% {
+    transform: translateY(-4px);
+  }
+}
+#god-prize {
+  position: absolute;
+  left: 50%;
+  top: 84px;
+  z-index: 31; /* above the level-up card screen (30) */
+  display: none;
+  align-items: center;
+  gap: 12px;
+  max-width: min(520px, 92vw);
+  padding: 10px 16px 10px 10px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  background: rgba(18, 14, 28, 0.92);
+  border: 2px solid var(--amber-bright);
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.55);
+}
+#god-prize.show {
+  display: flex;
+  animation: godPop 0.24s steps(3) both;
+}
+#god-prize.curse {
+  border-color: var(--danger);
+}
+/* while the level-up cards are open, GOD's popup drops to the bottom so
+   it never covers the cards or the GOD portrait above them */
+body.um-open #god-prize {
+  top: auto;
+  bottom: 24px;
+}
+#god-prize .god-sprite {
+  width: 76px;
+  height: 76px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+#god-prize .god-title {
+  font-family: var(--font-pixel);
+  font-size: 14px;
+  letter-spacing: 1px;
+  color: var(--amber-bright);
+  text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.6);
+}
+#god-prize.curse .god-title {
+  color: var(--danger);
+}
+#god-prize .god-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 6px;
+  font-family: var(--font-pixel);
+  font-size: 11px;
+  color: var(--text);
+}
+#god-prize .god-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+@keyframes godPop {
+  0% {
+    transform: translateX(-50%) scale(0.6);
+    opacity: 0;
+  }
+  100% {
+    transform: translateX(-50%) scale(1);
+    opacity: 1;
+  }
+}
+@media (max-width: 560px) {
+  #god-prize {
+    top: 70px;
+    padding: 8px 10px 8px 8px;
+  }
+  #god-prize .god-sprite {
+    width: 54px;
+    height: 54px;
+  }
+  #god-prize .god-title {
+    font-size: 12px;
+  }
+  .um-god {
+    width: 84px;
+    height: 84px;
+  }
+}
 .um-inner {
   text-align: center;
   max-width: 940px;
@@ -1006,6 +1114,54 @@ body.compact-hud #menu-fab {
   text-transform: uppercase;
   letter-spacing: 0.5px;
   padding: 0 8px;
+}
+.ui-ic {
+  /* menu-button pixel icons, filled from the sheet by UI.decorateIcons() */
+  display: inline-block;
+  vertical-align: -5px;
+  margin-right: 8px;
+}
+.ui-ic .pixel-icon {
+  vertical-align: top;
+}
+.up-card .pips {
+  display: flex;
+  justify-content: center;
+  gap: 3px;
+  margin-top: 6px;
+}
+.up-card .pip {
+  width: 8px;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(0, 0, 0, 0.5);
+}
+.up-card .pip.on {
+  background: var(--violet-bright);
+}
+.up-card .pip.next {
+  background: var(--amber-bright);
+  animation: pipBlink 0.6s steps(2) infinite; /* stepped, per the pixel-art rule */
+}
+@keyframes pipBlink {
+  50% {
+    opacity: 0.35;
+  }
+}
+.up-card .new-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  font-family: var(--font-pixel);
+  font-size: 9px;
+  letter-spacing: 1px;
+  padding: 2px 5px;
+  background: var(--amber-bright);
+  color: var(--ink);
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.5);
+}
+.up-card {
+  position: relative;
 }
 .up-card .lvl-tag {
   font-family: var(--font-pixel);
@@ -1364,3 +1520,51 @@ body.compact-hud #menu-fab {
 #net-stats .ns-good { color: var(--good); }
 #net-stats .ns-ok { color: var(--amber-bright); }
 #net-stats .ns-bad { color: var(--danger); }
+
+/* ---------- Fullscreen toggle (bottom-right, every screen) ----------
+   Pixel-art icon from four corner brackets (no emoji/icon font, per the
+   pixel-art rule). Brackets point OUT to enter fullscreen and flip IN
+   while fullscreen (body.is-fullscreen) to read as "exit". */
+#fullscreen-btn {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 30;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  pointer-events: auto;
+  cursor: pointer;
+  background: rgba(18, 14, 28, 0.85);
+  border: 2px solid var(--violet-bright);
+  box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.5);
+}
+#fullscreen-btn:hover {
+  border-color: var(--amber-bright);
+}
+#fullscreen-btn:active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.5);
+}
+#fullscreen-btn.unsupported {
+  display: none;
+}
+.fs-c {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  border: 0 solid var(--amber-bright);
+}
+.fs-c.tl { top: 8px; left: 8px; border-top-width: 3px; border-left-width: 3px; }
+.fs-c.tr { top: 8px; right: 8px; border-top-width: 3px; border-right-width: 3px; }
+.fs-c.bl { bottom: 8px; left: 8px; border-bottom-width: 3px; border-left-width: 3px; }
+.fs-c.br { bottom: 8px; right: 8px; border-bottom-width: 3px; border-right-width: 3px; }
+/* while fullscreen: brackets point inward = "exit fullscreen" */
+body.is-fullscreen .fs-c.tl { border-width: 0 3px 3px 0; }
+body.is-fullscreen .fs-c.tr { border-width: 0 0 3px 3px; }
+body.is-fullscreen .fs-c.bl { border-width: 3px 3px 0 0; }
+body.is-fullscreen .fs-c.br { border-width: 3px 0 0 3px; }
+/* the co-op netcode readout shares this corner — sit above the button */
+#net-stats {
+  bottom: 66px;
+}

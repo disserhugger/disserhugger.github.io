@@ -5,6 +5,106 @@
    ========================================================= */
 const UI = {
   els: {},
+  // Fills every <span class="ui-ic" data-icon="id"> with its pixel icon
+  // from the sheet — lets static HTML (menu buttons) use sprite-sheet
+  // icons instead of emoji, per the pixel-art rule.
+  decorateIcons(root) {
+    for (const el of (root || document).querySelectorAll(".ui-ic[data-icon]")) {
+      if (!el.firstChild) el.innerHTML = iconHTML(el.dataset.icon, 20, "");
+    }
+  },
+  /* ---- GOD, the prize giver ----
+     godPrize({items:[{id?, name}], curse?}) queues a popup of GOD
+     presenting what you just got. Queued (not stacked) so a Legendary
+     chest + the evolution it triggers read as two beats, capped at
+     CONFIG.god.maxQueued so a burst can't keep GOD on screen forever.
+     Timed on the wall clock, so it plays out even while the game is
+     paused on a level-up card. */
+  _godQueue: [],
+  _godBusy: false,
+  initGod() {
+    for (const img of document.querySelectorAll(".god-sprite")) {
+      img.onerror = () => img.classList.add("missing");
+      img.onload = () => img.classList.remove("missing");
+      if (ASSETS.god) img.src = ASSETS.god;
+      else img.classList.add("missing");
+    }
+  },
+  godPrize(prize) {
+    if (!prize || !prize.items || !prize.items.length) return;
+    this._godQueue.push(prize);
+    while (this._godQueue.length > CONFIG.god.maxQueued) this._godQueue.shift();
+    if (!this._godBusy) this._godNext();
+  },
+  _godNext() {
+    const el = document.getElementById("god-prize");
+    const prize = this._godQueue.shift();
+    if (!el || !prize) {
+      this._godBusy = false;
+      return;
+    }
+    this._godBusy = true;
+    el.classList.toggle("curse", !!prize.curse);
+    el.querySelector(".god-title").textContent =
+      prize.title || (prize.curse ? CONFIG.god.curseTitle : CONFIG.god.prizeTitle);
+    el.querySelector(".god-items").innerHTML = prize.items
+      .map(
+        (it) =>
+          `<span class="god-item">${it.id && ICON_SPRITE[it.id] ? iconHTML(it.id, 18, "") : ""}${escapeHtml(it.name)}</span>`,
+      )
+      .join("");
+    // restart the stepped pop-in even when popups arrive back to back
+    el.classList.remove("show");
+    void el.offsetWidth;
+    el.classList.add("show");
+    clearTimeout(this._godTimer);
+    this._godTimer = setTimeout(() => {
+      el.classList.remove("show");
+      this._godTimer = setTimeout(() => this._godNext(), 160);
+    }, CONFIG.god.popupMs);
+  },
+  godClear() {
+    this._godQueue = [];
+    clearTimeout(this._godTimer);
+    this._godBusy = false;
+    const el = document.getElementById("god-prize");
+    if (el) el.classList.remove("show");
+  },
+  /* ---- Fullscreen toggle (#fullscreen-btn, F key) ----
+     Fullscreens the whole document so the DOM HUD comes along with the
+     canvas. Game.resize() already listens for resize/visualViewport, so
+     the canvas re-fits on its own after the switch. Browsers without the
+     API (iPhone Safari has none for non-video elements) just hide the
+     button. Every call is wrapped — a rejected request (not triggered by
+     a user gesture, blocked by policy) must never throw into the game. */
+  fsElement() {
+    return document.fullscreenElement || document.webkitFullscreenElement || null;
+  },
+  initFullscreen() {
+    const btn = document.getElementById("fullscreen-btn");
+    const root = document.documentElement;
+    const supported = !!(root.requestFullscreen || root.webkitRequestFullscreen);
+    if (btn && !supported) btn.classList.add("unsupported");
+    const sync = () => document.body.classList.toggle("is-fullscreen", !!this.fsElement());
+    document.addEventListener("fullscreenchange", sync);
+    document.addEventListener("webkitfullscreenchange", sync);
+  },
+  toggleFullscreen() {
+    try {
+      if (this.fsElement()) {
+        const exit = document.exitFullscreen || document.webkitExitFullscreen;
+        const r = exit && exit.call(document);
+        if (r && r.catch) r.catch(() => {});
+      } else {
+        const root = document.documentElement;
+        const req = root.requestFullscreen || root.webkitRequestFullscreen;
+        const r = req && req.call(root);
+        if (r && r.catch) r.catch(() => {});
+      }
+    } catch (e) {
+      /* unsupported or blocked — nothing to do */
+    }
+  },
   cacheEls() {
     const ids = [
       "screen-menu",
@@ -329,7 +429,7 @@ const UI = {
       list.insertAdjacentHTML(
         "beforeend",
         `<div class="ach-card ${got ? "unlocked" : "locked"}">
-          <div class="ach-icon">${iconHTML(a.icon, 30, "🏆")}</div>
+          <div class="ach-icon">${iconHTML(ICON_SPRITE[a.icon] ? a.icon : "ui_trophy", 30, "")}</div>
           <div class="ach-main">
             <div class="ach-name">${showHidden ? "???" : a.name}</div>
             <div class="ach-desc">${showHidden ? "Keep playing to discover this one." : a.desc}</div>
@@ -367,13 +467,15 @@ const UI = {
   // Multiplayer.peers (peerId -> {name,color}); `selfProfile` is this
   // client's own {name,color} so the local player shows up too, since
   // Trystero only tells you about OTHER peers, not yourself.
-  renderMpPeerList(peers, selfProfile, isHost) {
+  // ★ marks whoever is hosting — including after a host migration, when
+  // it may no longer be the player who created the room.
+  renderMpPeerList(peers, selfProfile, isHost, hostId) {
     const list = this.els["mp-peer-list"];
     if (!list) return;
     list.innerHTML = "";
-    const rows = [{ name: selfProfile.name, color: selfProfile.color, self: true }];
+    const rows = [{ name: selfProfile.name, color: selfProfile.color, self: true, host: isHost }];
     for (const id in peers) {
-      rows.push({ name: peers[id].name, color: peers[id].color, self: false });
+      rows.push({ name: peers[id].name, color: peers[id].color, self: false, host: id === hostId });
     }
     for (const r of rows) {
       const safeColor = /^#[0-9a-fA-F]{3,8}$/.test(r.color) ? r.color : "#888";
@@ -381,7 +483,7 @@ const UI = {
         "beforeend",
         `<div class="mp-player-row">
           <div class="mp-player-swatch" style="background:${safeColor}"></div>
-          <div class="mp-player-name">${escapeHtml(r.name || "?")}${r.self ? " (you)" : ""}${r.self && isHost ? " ★" : ""}</div>
+          <div class="mp-player-name">${escapeHtml(r.name || "?")}${r.self ? " (you)" : ""}${r.host ? " ★" : ""}</div>
         </div>`,
       );
     }
@@ -487,6 +589,9 @@ const UI = {
     );
   },
   showUpgradeModal(title, sub, choices, onPick) {
+    const godImg = document.querySelector(".um-god");
+    if (godImg) godImg.style.display = CONFIG.god.onLevelUp ? "" : "none";
+    document.body.classList.add("um-open");
     this.els["um-title"].textContent = title;
     this.els["um-sub"].textContent = sub;
     const row = this.els["um-cards"];
@@ -497,10 +602,17 @@ const UI = {
       const isTool = TOOL_DEFS.includes(def);
       const card = document.createElement("div");
       card.className = "up-card" + (isTool ? " rare" : "");
-      card.innerHTML = `<div class="eyebrow">${isTool ? "TOOL" : "BUFF"}</div>
+      // Level pips: owned levels filled, the level you're about to take
+      // blinking, the rest empty \u2014 reads faster than "LV 3/5" text.
+      let pips = "";
+      for (let i = 1; i <= def.maxLevel; i++) {
+        pips += `<span class="pip${i <= currentLevel ? " on" : i === nextLevel ? " next" : ""}"></span>`;
+      }
+      card.innerHTML = `${currentLevel ? "" : '<div class="new-badge">NEW</div>'}<div class="eyebrow">${isTool ? "TOOL" : "BUFF"}</div>
         <div class="icon">${iconHTML(def.id, 40, def.icon)}</div>
         <div class="name">${def.name}</div>
-        <div class="lvl-tag">${isTool ? (currentLevel ? "LV " + currentLevel + " \u2192 " + nextLevel : "NEW!") : "LV " + nextLevel + "/" + def.maxLevel}</div>
+        <div class="lvl-tag">${nextLevel >= def.maxLevel ? "MAX LEVEL" : "LV " + nextLevel + "/" + def.maxLevel}</div>
+        <div class="pips">${pips}</div>
         <div class="desc">${def.desc(nextLevel)}</div>
         <div class="select-btn">Select</div>`;
       card.onclick = () => {
@@ -513,9 +625,20 @@ const UI = {
   },
   hideUpgradeModal() {
     this.els["upgrade-modal"].classList.remove("show");
+    document.body.classList.remove("um-open");
   },
   showResults(mode, stats, isRecord) {
     this.showScreen("screen-results");
+    // Co-op: Play Again restarts the whole room (host) or returns to the
+    // lobby to wait for the host (joiner) — see Game.mpRestartTogether().
+    const retry = document.querySelector('#screen-results [data-action="retry"]');
+    if (retry) {
+      retry.textContent = !Game.coop
+        ? "Play Again"
+        : typeof Multiplayer !== "undefined" && Multiplayer.isHost
+          ? "Play Again (everyone)"
+          : "Back to Lobby";
+    }
     this.els["results-title"].textContent =
       mode === "arcade" ? "Time\u2019s Up!" : "Game Over";
     const rows = [];

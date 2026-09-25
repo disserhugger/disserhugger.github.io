@@ -69,6 +69,11 @@ class Player {
     if (Game.activeEvent && Game.activeEvent.def.playerSpeedEventMult) {
       s *= Game.activeEvent.def.playerSpeedEventMult;
     }
+    // Momentum buff: faster the longer your combo runs (capped).
+    if (this.momentumLevel) {
+      const cfg = CONFIG.momentum;
+      s *= 1 + Math.min(cfg.capPerLevel * this.momentumLevel, (Game.combo || 0) * cfg.perCombo * this.momentumLevel);
+    }
     if (this.downed) s *= 0.18; // "can't move much" per spec — a crawl, not a stop
     return s;
   }
@@ -364,6 +369,13 @@ class Bayat {
     this.anchorX = 0;
     this.anchorY = 0;
   }
+  /* Things NO tool may pull: Dangerous Bayats (hugging them costs time)
+     and pull-immune Dissers/Nassers (the Bulldozer — its face costs time
+     too, so dragging it into you would be a trap). Explosive Bomb Bayats
+     are deliberately NOT here: pulling a bomb in to hug it is the play. */
+  get noPull() {
+    return !!(this.type.danger || this.type.pullImmune);
+  }
   get effectiveSpeed() {
     let s = this.baseSpeed * (this.chaosSpeedMult || 1);
     // Panic / Slow Motion / Time Stop / Chaos Mode events (bayatSpeedMult).
@@ -430,6 +442,14 @@ class Bayat {
       return;
     }
     if (this.slowT > 0) this.slowT -= dt;
+    // Central pull guard: tools (~27 sites in tools.js) and co-op relayed
+    // effects all pull by setting hookedT/anchorT, so dropping them HERE
+    // for no-pull types covers every tool, including ones added later.
+    if (this.noPull && (this.hookedT > 0 || this.anchorT > 0)) {
+      this.hookedT = 0;
+      this.anchorT = 0;
+      this.pullPeerId = null;
+    }
     if (this.hookedT > 0) {
       this.hookedT -= dt;
       /* Pull toward whoever actually cast it. A remote peer's pull tools
@@ -977,15 +997,20 @@ class Bayat {
       // walker keeps whatever way it last faced)
       if (patrol && this.patrolAxis === "h" && this.patrolDir < 0) ctx.scale(-1, 1);
       ctx.imageSmoothingEnabled = false;
+      // Glow is BAKED (GlowCache) instead of a live shadowBlur: a canvas
+      // blur is re-rasterised on every draw, which is one of the most
+      // expensive things a phone GPU can be asked to do per sprite.
+      let glowColor = null,
+        glowBlur = 0;
       if (this.type.glow) {
-        ctx.shadowColor = "#ffd76a";
-        ctx.shadowBlur = 26;
+        glowColor = "#ffd76a";
+        glowBlur = 26;
       } else if (this.type.danger || this.type.bulldozer) {
-        ctx.shadowColor = "rgba(255,60,80,.55)";
-        ctx.shadowBlur = 12;
+        glowColor = "rgba(255,60,80,.55)";
+        glowBlur = 12;
       } else if (bombBlink) {
-        ctx.shadowColor = "rgba(255,80,30,.7)";
-        ctx.shadowBlur = 18;
+        glowColor = "rgba(255,80,30,.7)";
+        glowBlur = 18;
       }
       // alpha-safe tint: only visible pixels are recolored, transparent pixels
       // (and partially-transparent edge pixels) are left exactly as they were.
@@ -999,7 +1024,16 @@ class Bayat {
             );
       // bottom edge at +size/2 either way, so a short sprite stands on
       // the same ground line instead of hovering at mid-height
-      ctx.drawImage(tinted || Sprites[imgKey], -w / 2, size / 2 - h, w, h);
+      const src = tinted || Sprites[imgKey];
+      if (glowBlur) {
+        const tintKey =
+          this.frozenT > 0 ? imgKey + "|frozen" : imgKey + "|" + tintColorOverride + "|" + tintStrengthOverride;
+        const g = GlowCache.get(src, tintKey, w, h, glowColor, glowBlur);
+        if (g) ctx.drawImage(g.canvas, -w / 2 - g.pad, size / 2 - h - g.pad, w + g.pad * 2, h + g.pad * 2);
+        else ctx.drawImage(src, -w / 2, size / 2 - h, w, h);
+      } else {
+        ctx.drawImage(src, -w / 2, size / 2 - h, w, h);
+      }
       ctx.shadowBlur = 0;
       ctx.restore();
     } else {
@@ -1308,6 +1342,64 @@ class BayatManager {
   // it'll just sit there until that peer's local checkHugs() catches it.
   // A real fix needs per-Bayat "nearest of N players" targeting, which is
   // a bigger change than this — see CLAUDE.md known gaps.
+  /* ---- Spatial grid for Bayat-to-Bayat separation ----
+     Separation used to test every Bayat against EVERY entity in the list
+     each frame — 100 Bayats x 200 entities = 20,000 distance checks, and
+     measured at 87% of all Bayat.update() time. Only neighbours closer
+     than (r1 + r2 + 18) ever push each other, so bucketing entities into
+     cells at least that big and checking the 3x3 cells around each Bayat
+     finds exactly the same pushers for a fraction of the work. Behaviour
+     is unchanged: same neighbours, same forces, same order of AI.
+     Buckets and the scratch array are reused, so it allocates nothing
+     per frame once warm. */
+  buildGrid() {
+    let maxR = 0;
+    for (const n of this.list) if (n.alive && n.radius > maxR) maxR = n.radius;
+    // largest possible separation distance + a margin for this frame's
+    // movement (positions are read live while the loop runs)
+    this._cell = maxR * 2 + 18 + 24;
+    const g = this._grid || (this._grid = new Map());
+    for (const bucket of g.values()) bucket.length = 0;
+    const c = this._cell;
+    for (const n of this.list) {
+      if (!n.alive) continue;
+      const k = Math.floor(n.x / c) * 4096 + Math.floor(n.y / c);
+      let bucket = g.get(k);
+      if (!bucket) g.set(k, (bucket = []));
+      bucket.push(n);
+    }
+  }
+  neighbours(n) {
+    const out = this._nb || (this._nb = []);
+    out.length = 0;
+    const c = this._cell,
+      g = this._grid;
+    const cx = Math.floor(n.x / c),
+      cy = Math.floor(n.y / c);
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        const bucket = g.get((cx + dx) * 4096 + (cy + dy));
+        if (bucket) for (let i = 0; i < bucket.length; i++) out.push(bucket[i]);
+      }
+    }
+    return out;
+  }
+  // id -> Bayat, rebuilt at most once per frame on demand. Replaces
+  // list.find() scans (snapshot apply, claims, relayed effects, missile
+  // drawing) that were O(n) each, O(n^2) per snapshot.
+  byId(id) {
+    const stamp = Game.elapsed + ":" + this.list.length;
+    if (this._byIdStamp !== stamp || !this._byId) {
+      const m = this._byId || (this._byId = new Map());
+      m.clear();
+      for (const n of this.list) m.set(n.id, n);
+      this._byIdStamp = stamp;
+    }
+    // A miss can mean "added this frame after the map was built" — fall
+    // back to a scan so the cache can only ever speed lookups up, never
+    // change their answer.
+    return this._byId.get(id) || this.list.find((n) => n.id === id);
+  }
   update(dt, elapsed, player, blackHoleLevel, extraSpawnAnchors) {
     const diff = this.difficulty(elapsed);
     // Hyper Hug Mode and spawn-flavored random events (Bayat Rush, Bayat
@@ -1358,6 +1450,7 @@ class BayatManager {
       }
     }
     this.syncFormations();
+    this.buildGrid();
     for (let i = this.list.length - 1; i >= 0; i--) {
       const n = this.list[i];
       if (!n.alive) {
@@ -1385,7 +1478,9 @@ class BayatManager {
           }
         }
       }
-      n.update(dt, target, this.list, blackHoleLevel);
+      // Nassers ignore separation entirely (they return before it), so
+      // they don't need a neighbour query at all.
+      n.update(dt, target, n.type.patrolType ? this.list : this.neighbours(n), blackHoleLevel);
     }
   }
   // Co-op, non-host clients: called instead of update() above — no
@@ -1430,10 +1525,15 @@ class BayatManager {
       for (let i = 0; i + 1 < intro.length; i += 2)
         introMap.set(intro[i], intro[i + 1]);
 
+    // One map for the whole snapshot instead of a list.find() per entry
+    // (that was O(n^2): 200 Bayats x 200 x 15 snapshots/sec on a joiner).
+    const idMap = this._snapIdMap || (this._snapIdMap = new Map());
+    idMap.clear();
+    for (const b of this.list) idMap.set(b.id, b);
     for (let i = 0; i + 2 < flat.length; i += 3) {
       const s = { id: flat[i], x: flat[i + 1], y: flat[i + 2] };
       seen.add(s.id);
-      let n = this.list.find((b) => b.id === s.id);
+      let n = idMap.get(s.id);
       if (!n) {
         /* An id we've never seen and no introduction for it: the host is
            mid-keyframe-interval and already introduced it to everyone who
@@ -1446,6 +1546,7 @@ class BayatManager {
         if (!type) continue; // unknown type key — ignore rather than throw
         n = new Bayat(type, s.x, s.y, difficulty || 0);
         n.id = s.id;
+        idMap.set(n.id, n);
         // the constructor's default lane is a guess — hide the hint until
         // the host's real lane arrives (normally in this same message)
         if (type.patrolType) n.patrolKnown = false;
@@ -1472,7 +1573,7 @@ class BayatManager {
        the snapshot stream above; nothing simulates the patrol here. */
     if (Array.isArray(patrols)) {
       for (let i = 0; i + 4 < patrols.length; i += 5) {
-        const n = this.list.find((b) => b.id === patrols[i]);
+        const n = idMap.get(patrols[i]);
         if (!n || !n.type.patrolType) continue;
         n.patrolAxis = patrols[i + 1] ? "v" : "h";
         n.patrolLo = patrols[i + 2];
