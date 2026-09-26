@@ -94,6 +94,7 @@ const SaveSystem = {
             badges: true,
             touchControls: isTouch,
             havas: true,
+            showFps: false,
           },
           JSON.parse(raw),
         );
@@ -106,6 +107,7 @@ const SaveSystem = {
       badges: true,
       touchControls: isTouch,
       havas: true,
+      showFps: false,
     };
   },
   setSettings(s) {

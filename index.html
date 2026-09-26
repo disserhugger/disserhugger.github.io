@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
     <title>How Many Bayats Can You Hug?</title>
     <link rel="stylesheet" href="css/style.css" />
@@ -25,7 +25,7 @@
             chase &middot; catch &middot; hug &middot; survive
           </div>
         </div>
-        <div class="menu-stack">
+        <div class="menu-stack menu-main">
           <button class="btn primary" data-action="start-arcade">
             <span class="ui-ic" data-icon="ui_play"></span>Arcade<br /><small>60 seconds. how many hugs?</small>
           </button>
@@ -44,7 +44,7 @@
             <span class="ui-ic" data-icon="ui_trophy"></span>Achievements
           </button>
           <button class="btn" data-action="show-htp"><span class="ui-ic" data-icon="ui_book"></span>How To Play</button>
-          <button class="btn" data-action="show-settings"><span class="ui-ic" data-icon="ui_gear"></span>Settings</button>
+          <button class="btn span2" data-action="show-settings"><span class="ui-ic" data-icon="ui_gear"></span>Settings</button>
         </div>
         <div class="stat-row">
           <div class="stat-pill">
@@ -255,6 +255,7 @@
       <div id="screen-settings" class="screen hidden">
         <div class="panel">
           <h2>Settings</h2>
+          <div class="settings-list">
           <div class="setting-row">
             <label>Master Volume</label>
             <input type="range" id="set-volume" min="0" max="100" value="70" />
@@ -298,6 +299,13 @@
             <div class="toggle on" id="set-havas" data-target="havas">
               <div class="knob"></div>
             </div>
+          </div>
+          <div class="setting-row">
+            <label>Show FPS</label>
+            <div class="toggle" id="set-fps" data-target="showFps">
+              <div class="knob"></div>
+            </div>
+          </div>
           </div>
           <div
             style="
@@ -388,6 +396,7 @@
       <button id="fullscreen-btn" data-action="toggle-fullscreen" title="Fullscreen (F)" aria-label="Toggle fullscreen">
         <span class="fs-c tl"></span><span class="fs-c tr"></span><span class="fs-c bl"></span><span class="fs-c br"></span>
       </button>
+      <div id="fps-meter" class="hidden"></div>
       <div id="combo-banner"></div>
       <div id="event-toast"></div>
       <!-- GOD prize popup — filled by UI.godPrize(); sprite from ASSETS.god -->
@@ -479,6 +488,7 @@
     <script src="js/content.js"></script>
     <script src="js/save-audio.js"></script>
     <script src="js/render-helpers.js"></script>
+    <script src="js/arena-life.js"></script>
     <script src="js/entities.js"></script>
     <script src="js/progression.js"></script>
     <script src="js/tools.js"></script>

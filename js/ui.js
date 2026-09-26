@@ -269,12 +269,25 @@ const UI = {
     }
   },
   compactHud: false,
+  // Big screens (smart boards, TVs): scale the whole DOM UI via the CSS
+  // --ui-scale variable (see style.css "Responsive layout" #7). 1 on
+  // anything up to CONFIG.display.uiRefW x uiRefH.
+  applyUiScale(vw, vh) {
+    const d = CONFIG.display;
+    const s = d.uiScale ? clamp(Math.min(vw / d.uiRefW, vh / d.uiRefH), 1, d.uiMaxScale) : 1;
+    if (s === this._uiScale) return;
+    this._uiScale = s;
+    document.documentElement.style.setProperty("--ui-scale", s.toFixed(3));
+    document.body.classList.toggle("big-screen", s > 1);
+  },
   updateCompactHud() {
     // On narrow phone screens, the equipped-tools tray got too cramped and
     // was costing needless per-frame DOM work — hide it and surface a
     // dedicated menu button instead; Inventory (via Pause) still shows
     // every equipped tool and buff at a glance.
-    this.compactHud = window.innerWidth <= 560;
+    // Also on SHORT screens (a phone held sideways): there the tray's two
+    // rows of 54px chips ate a third of the 360px-tall view.
+    this.compactHud = window.innerWidth <= 560 || window.innerHeight <= 520;
     document.body.classList.toggle("compact-hud", this.compactHud);
   },
   _toolNodes: {},

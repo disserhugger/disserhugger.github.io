@@ -1574,3 +1574,429 @@ body.is-fullscreen .fs-c.br { border-width: 3px 0 0 3px; }
 #net-stats {
   bottom: 66px;
 }
+
+/* =========================================================
+   RESPONSIVE LAYOUT — phones (portrait + landscape) up to
+   smart boards. Measured, not guessed: before this block the
+   main menu was cut off (unreachable, no scroll) on anything
+   shorter than ~800px — 39px lost top+bottom at 1280x720,
+   83px on a 360x640 phone, 219px on a landscape phone — and
+   on a 4K board every control was a fixed 14px.
+   ========================================================= */
+
+/* 1. A screen can NEVER clip. `safe center` centres while it fits and
+      falls back to top-aligned + scrollable when it doesn't (plain
+      `center` pushes the overflow off BOTH edges, where no scroll can
+      reach it — the original bug). The layouts below make the scroll
+      unnecessary on real devices; this is the safety net. */
+.screen {
+  justify-content: safe center;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding:
+    max(20px, env(safe-area-inset-top))
+    max(16px, env(safe-area-inset-right))
+    max(20px, env(safe-area-inset-bottom))
+    max(16px, env(safe-area-inset-left));
+}
+.panel {
+  max-height: 88vh;
+  max-height: calc(100dvh - 40px);
+}
+
+/* 2. Main menu: the two ways to play stay full width; the five
+      secondary buttons pair up in a 2-column grid. ~40% shorter, which
+      is what makes it fit a phone without scrolling. */
+.menu-stack.menu-main {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  width: min(440px, 92vw);
+  gap: 10px;
+}
+.menu-main .btn {
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.menu-main .btn.primary,
+.menu-main .btn.amber,
+.menu-main .btn.span2 {
+  grid-column: 1 / -1;
+}
+
+/* 3. Short screens (phones, landscape tablets, 720p laptops). */
+@media (max-height: 760px) {
+  .title-wrap {
+    margin-bottom: 14px;
+  }
+  .kicker {
+    margin-bottom: 6px;
+  }
+  .subtitle {
+    margin-top: 6px;
+  }
+  .stat-row {
+    margin-top: 14px;
+  }
+  .menu-main .btn:not(.primary):not(.amber) small:not(#menu-arena-name) {
+    display: none; /* the button label says it — the subtitle is extra */
+  }
+}
+@media (max-height: 640px) {
+  .kicker {
+    display: none;
+  }
+  h1.game-title {
+    font-size: clamp(20px, 6.5vw, 34px);
+  }
+  .menu-main .btn,
+  .panel .menu-stack .btn {
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+  .stat-row {
+    gap: 8px;
+  }
+  .stat-pill {
+    padding: 5px 9px;
+    font-size: 10px;
+  }
+  .panel {
+    padding: 16px;
+  }
+  .panel h2 {
+    font-size: 16px;
+    margin-bottom: 10px;
+    padding-bottom: 7px;
+  }
+  .setting-row {
+    padding: 7px 2px;
+  }
+}
+/* Narrow phones: keep the grid buttons' labels on one line. */
+@media (max-width: 400px) {
+  .menu-main .btn {
+    font-size: 12px;
+    letter-spacing: 0.5px;
+  }
+  .menu-main .ui-ic {
+    margin-right: 5px;
+  }
+}
+
+/* 4. Landscape phones (short AND wide): side-by-side instead of
+      stacked — the title on the left, the menu on the right. Every
+      subtitle goes; 360px of height has no room for them. */
+@media (max-height: 520px) and (min-aspect-ratio: 4/3) {
+  #screen-menu {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+    grid-template-rows: 1fr auto;
+    align-items: center;
+    column-gap: 20px;
+  }
+  #screen-menu.hidden {
+    display: none !important;
+  }
+  #screen-menu .title-wrap {
+    grid-column: 1;
+    grid-row: 1;
+    margin: 0;
+  }
+  #screen-menu .menu-main {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    width: 100%;
+    justify-self: center;
+    max-width: 440px;
+  }
+  #screen-menu .stat-row {
+    grid-column: 1;
+    grid-row: 2;
+    margin-top: 0;
+    align-self: start;
+  }
+  .menu-main .btn small:not(#menu-arena-name) {
+    display: none;
+  }
+  .menu-main .btn {
+    padding-top: 8px;
+    padding-bottom: 8px;
+    font-size: 12px;
+  }
+  .menu-main {
+    gap: 8px;
+  }
+  .panel {
+    max-height: calc(100dvh - 24px);
+    padding: 12px 16px;
+  }
+  .screen {
+    padding-top: max(12px, env(safe-area-inset-top));
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+  }
+  /* settings: two columns of toggles */
+  #screen-settings .panel {
+    width: min(720px, 94vw);
+  }
+  #screen-settings .settings-list {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 22px;
+  }
+  /* any button stack inside a panel goes side by side (pause 2x2,
+     results / lobby / co-op in a row) */
+  .panel .menu-stack {
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: 100%;
+    gap: 8px;
+    margin-top: 8px !important;
+  }
+  .panel .menu-stack .btn {
+    flex: 1 1 140px;
+    padding-top: 9px;
+    padding-bottom: 9px;
+  }
+  #screen-pause .panel {
+    width: min(460px, 90vw) !important;
+  }
+  /* the co-op screens' one-line intros — the headings already say it */
+  #screen-mp-hostjoin .panel > p,
+  #screen-mp-profile .panel > p {
+    display: none;
+  }
+  .panel h3 {
+    margin-top: 10px;
+  }
+  /* results: stats in two columns */
+  #screen-results .panel {
+    width: min(720px, 94vw);
+  }
+  #screen-results .results-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    margin: 8px 0 10px;
+    gap: 5px 16px;
+  }
+  /* keep the menu clear of the fullscreen button in the corner */
+  #screen-menu {
+    padding-right: max(60px, env(safe-area-inset-right));
+  }
+}
+
+/* 5. Level-up / chest cards on phones: a compact HORIZONTAL card
+      (icon left, text right, the whole card is the button), so three
+      choices fit on one phone screen instead of three screens of
+      scrolling. */
+@media (max-width: 560px), (max-height: 520px) {
+  .um-inner {
+    margin: 12px auto 16px;
+  }
+  .um-god {
+    width: 64px;
+    height: 64px;
+    margin-bottom: 4px;
+  }
+  .um-title {
+    font-size: 19px;
+  }
+  .um-sub {
+    margin-bottom: 10px;
+  }
+  .card-row {
+    gap: 10px;
+  }
+  .up-card {
+    width: min(460px, 94vw);
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 58px 1fr;
+    grid-template-rows: auto auto auto 1fr;
+    column-gap: 10px;
+    align-items: center;
+    text-align: left;
+    padding: 0 10px 8px 0;
+  }
+  .up-card .eyebrow {
+    grid-column: 1 / -1;
+    padding: 3px 0 3px 10px;
+    text-align: left;
+    margin-bottom: 6px;
+  }
+  .up-card .icon {
+    grid-column: 1;
+    grid-row: 2 / span 3;
+    margin: 0 0 0 8px;
+    align-self: center;
+  }
+  .up-card .name {
+    grid-column: 2;
+    padding: 0;
+  }
+  .up-card .lvl-tag,
+  .up-card .pips {
+    display: inline-flex;
+    grid-column: 2;
+    margin-top: 2px;
+    justify-content: flex-start;
+  }
+  .up-card .desc {
+    grid-column: 2;
+    padding: 3px 0 0;
+    text-align: left;
+  }
+  .up-card .select-btn {
+    display: none; /* the whole card is tappable */
+  }
+}
+/* Landscape phones: three compact cards side by side. */
+@media (max-height: 520px) and (min-aspect-ratio: 4/3) {
+  .um-inner {
+    width: 96vw;
+    margin: 6px auto 8px;
+  }
+  .um-god {
+    display: none;
+  }
+  .card-row {
+    flex-wrap: nowrap;
+  }
+  .up-card {
+    width: auto;
+    flex: 1 1 0;
+    max-width: 300px;
+    grid-template-columns: 44px 1fr;
+  }
+  .up-card .icon .pixel-icon {
+    transform: scale(0.8);
+  }
+}
+
+/* 6. The in-run HUD on a landscape phone: 360px of height is precious,
+      so the top panel slims down. */
+@media (max-height: 520px) {
+  .hud-panel {
+    top: 4px;
+    padding: 4px 8px 5px;
+    gap: 4px;
+  }
+  .hud-value {
+    font-size: 15px;
+  }
+  .hud-label {
+    font-size: 7px;
+  }
+  #fullscreen-btn {
+    width: 38px;
+    height: 38px;
+    right: 8px;
+    bottom: 8px;
+  }
+}
+
+/* 7. Big screens (smart boards, TVs, 1440p+): the whole DOM UI scales
+      up by --ui-scale, which UI.applyUiScale() sets from the viewport
+      (1 on a normal monitor, ~2.4 on a 4K board). `zoom` rather than
+      transform so the layout itself grows — no overlap, correct hit
+      areas. The joystick is left alone: it's positioned in raw screen px
+      from touch coordinates. */
+.screen > *,
+#hud,
+#upgrade-modal .um-inner,
+#god-prize,
+#event-toast,
+#combo-banner,
+#fullscreen-btn,
+#context-lost-banner .clb-inner {
+  zoom: var(--ui-scale, 1);
+}
+
+/* Arena + Achievements: the list is the ONE thing that scrolls, and it
+   takes whatever height the panel has left (it used to be a fixed 56vh
+   inside a panel that could ALSO scroll — two nested scrollbars on a
+   landscape phone). */
+#screen-arena .panel,
+#screen-achievements .panel,
+#screen-inventory .panel {
+  display: flex;
+  flex-direction: column;
+}
+#screen-arena .arena-list,
+#screen-achievements .arena-list,
+#screen-inventory .inv-body {
+  max-height: none;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Toasts wrap instead of running off both edges of a phone ("A HAVA HAS
+   ARRIVED — IT EATS DANGEROUS BAYATS... AND YOURS!" was ~2x a phone's
+   width on one nowrap line). max-content keeps short toasts one line. */
+#event-toast {
+  white-space: normal;
+  width: max-content;
+  max-width: min(640px, calc(100vw - 32px));
+  text-align: center;
+  line-height: 1.35;
+}
+#combo-banner {
+  max-width: calc(100vw - 24px);
+  text-align: center;
+}
+@media (max-width: 560px) {
+  #event-toast {
+    font-size: 11px;
+    letter-spacing: 1px;
+    padding: 7px 10px;
+  }
+  #combo-banner {
+    font-size: 26px;
+  }
+}
+/* Portrait phones: keep the menu's bottom row clear of the fullscreen
+   button in the corner. */
+@media (max-width: 560px) {
+  #screen-menu {
+    padding-bottom: max(62px, env(safe-area-inset-bottom));
+  }
+}
+/* A button stack inside a panel is never wider than the panel. It was
+   min(340px, 84vw) regardless — on a 320px phone that's 269px inside a
+   248px panel, so results/pause/co-op panels grew a sideways scrollbar. */
+.panel .menu-stack {
+  width: min(340px, 100%);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* The floating joystick grows with the UI on big touch screens (its
+   drag radius in game.js is scaled by the same --ui-scale). */
+.joystick-base,
+.joystick-knob {
+  transform: translate(-50%, -50%) scale(var(--ui-scale, 1));
+}
+
+/* Settings > Show FPS — bottom centre, clear of the menu button and the
+   fullscreen button. The colour says it at a glance. */
+#fps-meter {
+  position: absolute;
+  left: 50%;
+  bottom: max(8px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 40;
+  pointer-events: none;
+  font-family: var(--font-pixel);
+  font-size: 11px;
+  letter-spacing: 1px;
+  padding: 3px 8px;
+  background: rgba(10, 6, 16, 0.8);
+  border: 2px solid var(--overlay);
+  color: var(--subtext);
+  zoom: var(--ui-scale, 1);
+}
+#fps-meter.good { color: var(--good); }
+#fps-meter.ok { color: var(--amber-bright); }
+#fps-meter.bad { color: var(--danger); }
+#fps-meter.hidden { display: none; }

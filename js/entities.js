@@ -219,10 +219,7 @@ class Player {
       ctx.save();
       ctx.rotate(tilt);
       ctx.scale(this.facing < 0 ? -squashX : squashX, squashY);
-      if (this.turboBoostT > 0) {
-        ctx.shadowColor = "#ffd76a";
-        ctx.shadowBlur = 16;
-      }
+      if (this.turboBoostT > 0) drawGlow(ctx, 0, 0, "#ffd76a", this.radius * 2.2, 0.7); // baked glow
       // Giant Mode event: purely visual scale-up (collision/arena-bounds
       // stay tied to the real this.radius — only the sprite grows).
       const giantVisualMult =

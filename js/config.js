@@ -194,6 +194,64 @@ const CONFIG = {
   perf: {
     maxParticles: 1200, // cosmetic particles beyond this are dropped (oldest first)
     glowCacheMax: 160, // baked glow sprites kept before the cache resets
+    // Adaptive resolution (Game.perfTick): watches the REAL frame rate in a
+    // run and lowers the canvas resolution when it's below targetFps — but
+    // only KEEPS a lower level if it actually bought frames (minGain);
+    // otherwise pixels weren't the bottleneck (a 30Hz screen, a busy CPU)
+    // and it goes back, so nobody gets a blurrier game for nothing.
+    adaptive: {
+      enabled: true,
+      targetFps: 50, // below this (averaged over windowMs) → step down
+      upFps: 57, // at/above this for upAfter windows → try a step up
+      upAfter: 4,
+      windowMs: 2000,
+      minGain: 0.08, // a step down must raise FPS by 8% or it's undone
+      noHelpHoldMs: 30000, // after an undone step, wait this long to retry
+      levels: [1, 0.8, 0.65, 0.5], // x the device pixel ratio
+      minDpr: 0.6,
+    },
+  },
+
+  // ---- Arena Life: the living decoration layer (js/arena-life.js,
+  // CLAUDE.md "Arena Life"). Purely cosmetic — nothing here changes a
+  // gameplay number. Per-arena content lives in ARENAS[i].life. ----
+  arenaLife: {
+    enabled: true, // false = the plain decor only, no weather/critters/lights
+    decorCount: 2600, // clustered decoration per arena (the old decor was 70 total)
+    decorScale: 1.5, // drawn size of small decor + critters (their art is 1px = 1 unit)
+    setPieces: 10, // ponds, trees, mausoleums, lava pools, frozen lakes...
+    ambientDensity: 1, // x each arena's weather density (per million world px²)
+    critterMult: 1, // x each arena's critter population
+    reducedMult: 0.35, // Settings > Reduced Particles scales weather + critters by this
+    reactRadius: 30, // how close a mover must be to bend grass / rustle a bush
+    scareRadius: 110, // critters flee from you inside this
+    maxMarks: 260, // footprints / ripples kept at once (oldest dropped)
+    lights: true, // additive glow from candles, crystals, lava, wisps...
+    maxLights: 40, // strongest N lights per frame (each is a big additive quad)
+    maxLightsLow: 16, // ...while adaptive resolution has stepped down twice+
+    canopyFade: 0.32, // tree canopies fade to this alpha while you're under them
+  },
+
+  // ---- Screen fitting: phones up to smart boards (see CLAUDE.md
+  // "Responsive layout"). Both scales key off the SHORT side / viewport
+  // size in CSS px, so a normal laptop or monitor is exactly 1x. ----
+  display: {
+    // World zoom — how much of the arena you see. Without it a phone saw a
+    // 360px-wide sliver and a 4K board saw a huge map of tiny sprites.
+    worldZoom: true,
+    smallScreenRef: 600, // short side below this zooms OUT (see more on a phone)...
+    minZoom: 0.8, // ...but never below this, or sprites get too small to read
+    largeScreenRef: 1100, // short side above this zooms IN...
+    maxZoom: 3, // ...up to this (a 4K board shows what a 1080p monitor does)
+    // DOM UI scale (menus, HUD, cards, popups) for big screens.
+    uiScale: true,
+    uiRefW: 1600, // at or below 1600x900 the UI is 1x
+    uiRefH: 900,
+    uiMaxScale: 3,
+    // Canvas backing-buffer cap: a 4K board at 2x dpr would be a 33MP
+    // canvas — slow and a context-loss risk. Lowers dpr (never below 1)
+    // to stay under this many device pixels.
+    maxCanvasPixels: 3840 * 2160,
   },
 
   // ---- GOD, the prize giver (see CLAUDE.md "GOD") ----

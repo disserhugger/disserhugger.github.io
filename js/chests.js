@@ -121,10 +121,11 @@ class ChestSystem {
       ctx.save();
       ctx.translate(sx, sy);
       if (def.glow) {
-        ctx.shadowColor = def.rainbow
-          ? `hsl(${(performance.now() / 6) % 360},90%,65%)`
-          : def.glow;
-        ctx.shadowBlur = c.opened ? 30 : 18;
+        // Baked stepped glow (drawGlow) instead of a live shadowBlur, which
+        // re-blurred every fillRect of every chest every frame. The rainbow
+        // hue is stepped (12 hues) so the glow cache stays small.
+        const col = def.rainbow ? "hsl(" + (Math.floor(performance.now() / 180) % 12) * 30 + ",90%,65%)" : def.glow;
+        drawGlow(ctx, 0, 2, col, c.opened ? 52 : 40, c.opened ? 0.9 : 0.7);
       }
       if (c.opened) {
         // opening sequence: base box stays put, lid pops up + rotates open,

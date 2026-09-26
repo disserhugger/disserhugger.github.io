@@ -259,69 +259,8 @@ function drawFloorFeature(ctx, x, y, kind, seed, color) {
     ctx.globalAlpha = 1;
   }
 }
-function drawFloor(ctx, cam, floor, arena) {
-  if (!floor) return;
-  const { grid, cols, rows } = floor;
-  const startCol = Math.max(0, Math.floor(cam.x / FLOOR_CELL) - 1);
-  const endCol = Math.min(
-    cols - 1,
-    Math.ceil((cam.x + cam.w) / FLOOR_CELL) + 1,
-  );
-  const startRow = Math.max(0, Math.floor(cam.y / FLOOR_CELL) - 1);
-  const endRow = Math.min(
-    rows - 1,
-    Math.ceil((cam.y + cam.h) / FLOOR_CELL) + 1,
-  );
-  for (let r = startRow; r <= endRow; r++) {
-    const row = grid[r];
-    if (!row) continue;
-    for (let c = startCol; c <= endCol; c++) {
-      const t = row[c];
-      if (!t) continue;
-      const x = c * FLOOR_CELL - cam.x,
-        y = r * FLOOR_CELL - cam.y;
-      ctx.fillStyle = t.color;
-      ctx.fillRect(x, y, FLOOR_CELL, FLOOR_CELL);
-      if (t.feature)
-        drawFloorFeature(
-          ctx,
-          x,
-          y,
-          t.feature,
-          t.seed,
-          arena.floorFeatureColor || "#000",
-        );
-    }
-  }
-}
-function generateDecor(arena) {
-  const palette = (arena && arena.decorPalette) || [
-    "#3a3055",
-    "#4a3f6b",
-    "#2f2648",
-  ];
-  const kinds = (arena && arena.decorKinds) || [
-    "rock",
-    "bush",
-    "flower",
-    "crystal",
-  ];
-  const list = [];
-  for (let i = 0; i < 70; i++) {
-    const x = rand(120, CONFIG.arena.width - 120);
-    const y = rand(120, CONFIG.arena.height - 120);
-    if (dist(x, y, CONFIG.arena.width / 2, CONFIG.arena.height / 2) < 300)
-      continue;
-    list.push({
-      x,
-      y,
-      kind: choice(kinds),
-      c: choice(palette),
-      seed: Math.random(),
-    });
-  }
-  return list;
-}
+// drawFloor() moved to js/arena-life.js (ArenaLife.drawFloor — baked chunks).
+// generateDecor() moved to js/arena-life.js (generateArenaWorld).
 function generateZones(arena) {
   const colors = (arena && arena.zoneColors) || [
     "rgba(124,58,237,0.10)",
@@ -338,90 +277,7 @@ function generateZones(arena) {
   }
   return list;
 }
-function drawDecor(ctx, cam, decor) {
-  for (const d of decor) {
-    // Destructible decor (rock/crystal — see Game.updateDestructibles()):
-    // once broken it's just gone, no rubble sprite to keep drawing.
-    if (d.broken) continue;
-    const sx = d.x - cam.x,
-      sy = d.y - cam.y;
-    if (sx < -40 || sx > cam.w + 40 || sy < -40 || sy > cam.h + 40) continue;
-    ctx.save();
-    ctx.translate(sx, sy);
-    ctx.fillStyle = d.c;
-    if (d.kind === "rock") {
-      ctx.fillRect(-10, -6, 20, 14);
-      ctx.fillRect(-6, -10, 12, 6);
-    } else if (d.kind === "bush") {
-      ctx.fillRect(-12, -4, 24, 10);
-      ctx.fillRect(-8, -9, 16, 7);
-      ctx.fillStyle = "#2f6b4a";
-      ctx.fillRect(-10, -6, 20, 8);
-    } else if (d.kind === "flower") {
-      ctx.fillStyle = "#4a3f6b";
-      ctx.fillRect(-2, -2, 4, 10);
-      ctx.fillStyle = d.seed > 0.5 ? "#ff7ab8" : "#a970ff";
-      ctx.fillRect(-6, -10, 4, 4);
-      ctx.fillRect(2, -10, 4, 4);
-      ctx.fillRect(-2, -14, 4, 4);
-      ctx.fillRect(-2, -6, 4, 4);
-    } else if (d.kind === "crystal") {
-      ctx.fillStyle = "#7fd8e8";
-      ctx.globalAlpha = 0.7;
-      ctx.beginPath();
-      ctx.moveTo(0, -14);
-      ctx.lineTo(7, 0);
-      ctx.lineTo(0, 14);
-      ctx.lineTo(-7, 0);
-      ctx.closePath();
-      ctx.fill();
-      ctx.globalAlpha = 1;
-    } else if (d.kind === "tombstone") {
-      ctx.fillStyle = d.c;
-      ctx.fillRect(-7, -14, 14, 18);
-      ctx.beginPath();
-      ctx.arc(0, -14, 7, Math.PI, 0);
-      ctx.fill();
-    } else if (d.kind === "deadtree") {
-      ctx.strokeStyle = d.c;
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(0, 10);
-      ctx.lineTo(0, -14);
-      ctx.moveTo(0, -6);
-      ctx.lineTo(-9, -16);
-      ctx.moveTo(0, -10);
-      ctx.lineTo(8, -18);
-      ctx.stroke();
-    } else if (d.kind === "fog") {
-      ctx.globalAlpha = 0.18;
-      ctx.fillStyle = "#c7c7d8";
-      ctx.beginPath();
-      ctx.ellipse(0, 0, 26, 10, 0, 0, TAU);
-      ctx.fill();
-      ctx.globalAlpha = 1;
-    } else if (d.kind === "ember") {
-      ctx.fillStyle = "#ff9d4d";
-      ctx.globalAlpha = 0.8;
-      ctx.beginPath();
-      ctx.arc(0, 0, 4, 0, TAU);
-      ctx.fill();
-      ctx.globalAlpha = 1;
-    } else if (d.kind === "icecrystal") {
-      ctx.fillStyle = "#bfe9ff";
-      ctx.globalAlpha = 0.75;
-      ctx.beginPath();
-      ctx.moveTo(0, -16);
-      ctx.lineTo(5, 0);
-      ctx.lineTo(0, 16);
-      ctx.lineTo(-5, 0);
-      ctx.closePath();
-      ctx.fill();
-      ctx.globalAlpha = 1;
-    }
-    ctx.restore();
-  }
-}
+// drawDecor() moved to js/arena-life.js (ArenaLife.drawDecor).
 function drawPixelStar(ctx, x, y, size, color) {
   ctx.fillStyle = color;
   ctx.fillRect(x - size / 2, y - size * 1.5, size, size * 3);
@@ -608,8 +464,7 @@ function drawPickup(ctx, cam, p) {
   if (sx < -30 || sx > cam.w + 30 || sy < -30 || sy > cam.h + 30) return;
   ctx.save();
   ctx.translate(sx, sy);
-  ctx.shadowColor = p.def.color;
-  ctx.shadowBlur = 12;
+  drawGlow(ctx, 0, 0, p.def.color, 24, 0.6); // baked, not a live shadowBlur
   const s = 9 + Math.sin(p.bob * 1.3) * 1.5;
   ctx.fillStyle = p.def.color;
   ctx.beginPath();

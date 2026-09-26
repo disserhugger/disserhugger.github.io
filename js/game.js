@@ -181,14 +181,133 @@ const Game = {
     // is negligible on a small screen anyway.
     const isTouch =
       "ontouchstart" in window || (navigator.maxTouchPoints || 0) > 0;
-    const dpr = Math.min(window.devicePixelRatio || 1, isTouch ? 1.5 : 2);
-    this.canvas.width = innerWidth * dpr;
-    this.canvas.height = innerHeight * dpr;
-    this.canvas.style.width = innerWidth + "px";
-    this.canvas.style.height = innerHeight + "px";
-    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    this.camera.resize(innerWidth, innerHeight);
+    const vw = innerWidth,
+      vh = innerHeight;
+    let dpr = Math.min(window.devicePixelRatio || 1, isTouch ? 1.5 : 2);
+    const maxPx = CONFIG.display.maxCanvasPixels;
+    if (maxPx && vw * vh * dpr * dpr > maxPx) dpr = Math.max(1, Math.sqrt(maxPx / (vw * vh)));
+    // adaptive resolution (perfTick): fewer pixels while the device struggles
+    const ad = CONFIG.perf.adaptive;
+    if (ad && ad.enabled && this.renderLevel) dpr = Math.max(ad.minDpr, dpr * ad.levels[this.renderLevel]);
+    this.renderDpr = dpr;
+    // World zoom (CONFIG.display): the camera sees vw/zoom x vh/zoom WORLD
+    // px. Everything drawn in "screen space" uses cam.w/cam.h too, so it
+    // still covers the whole canvas — overlays just scale with the zoom.
+    const zoom = this.computeWorldZoom(vw, vh);
+    this.worldZoom = zoom;
+    this._vw = vw; // what resize() last fitted — polled in loop()
+    this._vh = vh;
+    this.canvas.width = vw * dpr;
+    this.canvas.height = vh * dpr;
+    this.canvas.style.width = vw + "px";
+    this.canvas.style.height = vh + "px";
+    this.ctx.setTransform(dpr * zoom, 0, 0, dpr * zoom, 0, 0);
+    this.camera.resize(vw / zoom, vh / zoom);
+    UI.applyUiScale(vw, vh);
     UI.updateCompactHud();
+  },
+  /* ---- adaptive resolution (CONFIG.perf.adaptive) ----
+     Measures the real frame rate in 2s windows while a run is playing.
+     Below targetFps it drops a resolution level — then JUDGES that step
+     on the next window: if FPS didn't rise by minGain, pixels weren't the
+     bottleneck (a 30Hz screen, a CPU-bound device) and the step is undone
+     and not retried for noHelpHoldMs. Steps back up after upAfter good
+     windows; a step up that drops us under target is undone and that
+     level is off-limits for a minute. */
+  renderLevel: 0,
+  perfTick(ts) {
+    const a = CONFIG.perf.adaptive;
+    if (!a || !a.enabled || this.state !== "playing" || document.hidden) {
+      this._pf = null;
+      return;
+    }
+    const pf = this._pf;
+    if (!pf) {
+      this._pf = { start: ts, last: ts, frames: 0 };
+      return;
+    }
+    const gap = ts - pf.last;
+    pf.last = ts;
+    if (gap > 250) {
+      // tab switch, hitch, level-up screen: restart the window
+      pf.start = ts;
+      pf.frames = 0;
+      return;
+    }
+    pf.frames++;
+    if (ts - pf.start < a.windowMs) return;
+    const fps = (pf.frames * 1000) / (ts - pf.start);
+    pf.start = ts;
+    pf.frames = 0;
+    this.adaptDecide(fps, ts);
+  },
+  adaptDecide(fps, ts) {
+    const a = CONFIG.perf.adaptive;
+    const s = this._ad || (this._ad = { good: 0, pending: null, noHelpUntil: 0, ceiling: -1, ceilUntil: 0 });
+    if (s.pending) {
+      const p = s.pending;
+      s.pending = null;
+      if (p.dir < 0 && fps < p.fps * (1 + a.minGain)) {
+        this.setRenderLevel(p.from); // didn't help — put the pixels back
+        s.noHelpUntil = ts + a.noHelpHoldMs;
+        return;
+      }
+      if (p.dir > 0 && fps < a.targetFps) {
+        this.setRenderLevel(p.from); // too ambitious
+        s.ceiling = p.from;
+        s.ceilUntil = ts + 60000;
+        return;
+      }
+    }
+    if (fps < a.targetFps) {
+      s.good = 0;
+      if (this.renderLevel < a.levels.length - 1 && ts > s.noHelpUntil) {
+        s.pending = { dir: -1, from: this.renderLevel, fps };
+        this.setRenderLevel(this.renderLevel + 1);
+      }
+    } else if (fps >= a.upFps) {
+      s.good++;
+      const blocked = s.ceilUntil > ts && this.renderLevel - 1 < s.ceiling;
+      if (s.good >= a.upAfter && this.renderLevel > 0 && !blocked) {
+        s.good = 0;
+        s.pending = { dir: 1, from: this.renderLevel, fps };
+        this.setRenderLevel(this.renderLevel - 1);
+      }
+    } else s.good = 0;
+  },
+  setRenderLevel(l) {
+    if (l === this.renderLevel) return;
+    this.renderLevel = l;
+    this.resize();
+  },
+  // Settings > Show FPS: a tiny readout, refreshed twice a second.
+  fpsMeterTick(ts) {
+    const el = this._fpsEl || (this._fpsEl = document.getElementById("fps-meter"));
+    if (!el) return;
+    const on = !!(this.settings && this.settings.showFps);
+    if (on !== this._fpsOn) {
+      this._fpsOn = on;
+      this._fm = null;
+      el.classList.toggle("hidden", !on);
+    }
+    if (!on) return;
+    const m = this._fm || (this._fm = { t: ts, n: 0 });
+    m.n++;
+    if (ts - m.t >= 500) {
+      const fps = Math.round((m.n * 1000) / (ts - m.t));
+      el.textContent = "FPS " + fps + " \u00b7 " + (this.renderDpr || 1).toFixed(2) + "x";
+      el.className = fps >= 55 ? "good" : fps >= 40 ? "ok" : "bad";
+      m.t = ts;
+      m.n = 0;
+    }
+  },
+  computeWorldZoom(vw, vh) {
+    const d = CONFIG.display;
+    if (!d.worldZoom) return 1;
+    const short = Math.min(vw, vh);
+    if (short < d.smallScreenRef) return Math.max(d.minZoom, short / d.smallScreenRef);
+    if (short > d.largeScreenRef) return Math.min(d.maxZoom, short / d.largeScreenRef);
+    return 1;
   },
   bindInput() {
     window.addEventListener("keydown", (e) => {
@@ -274,15 +393,18 @@ const Game = {
       let dx = t.clientX - touchOrigin.x,
         dy = t.clientY - touchOrigin.y;
       const len = Math.sqrt(dx * dx + dy * dy);
-      if (len > JOY_RADIUS) {
-        dx = (dx / len) * JOY_RADIUS;
-        dy = (dy / len) * JOY_RADIUS;
+      // Scaled with the UI on big touch screens (smart boards), matching
+      // the CSS scale on .joystick-base/.joystick-knob.
+      const joyR = JOY_RADIUS * (UI._uiScale || 1);
+      if (len > joyR) {
+        dx = (dx / len) * joyR;
+        dy = (dy / len) * joyR;
       }
       this.joystick.knobX = touchOrigin.x + dx;
       this.joystick.knobY = touchOrigin.y + dy;
       this.joyKnob.style.left = this.joystick.knobX + "px";
       this.joyKnob.style.top = this.joystick.knobY + "px";
-      const dead = 10;
+      const dead = 10 * (UI._uiScale || 1);
       this.input.left = dx < -dead;
       this.input.right = dx > dead;
       this.input.up = dy < -dead;
@@ -465,6 +587,7 @@ const Game = {
     bindToggle("set-badges", "badges");
     bindToggle("set-touch", "touchControls");
     bindToggle("set-havas", "havas");
+    bindToggle("set-fps", "showFps");
     document.getElementById("set-havas").addEventListener("click", () => {
       if (!this.havasOn) this.removeHavas();
     });
@@ -494,6 +617,7 @@ const Game = {
     document
       .getElementById("set-havas")
       .classList.toggle("on", this.settings.havas !== false);
+    document.getElementById("set-fps").classList.toggle("on", !!this.settings.showFps);
   },
 
   /* =========================================================
@@ -971,7 +1095,7 @@ const Game = {
       if (def) this.startEvent(def, ev.t || 0);
     }
     if (Array.isArray(broken) && this.decor) {
-      for (const i of broken) if (this.decor[i]) this.decor[i].broken = true;
+      for (const i of broken) if (this.decor[i]) (this.decor[i].broken = true), ArenaLife.decorChanged(this.decor[i]);
     }
   },
   // ---- per-frame networking: called from update(dt) only while
@@ -1615,9 +1739,15 @@ const Game = {
     const worldSeed = this.coop && this.mpWorldSeed != null ? this.mpWorldSeed : null;
     withSeededRandom(worldSeed, () => {
       this.floor = generateFloorTiles(this.arena);
-      this.decor = generateDecor(this.arena);
+      decorateFloorTiles(this.floor, this.arena);
+      // Decor + set pieces (js/arena-life.js). Seeded, so the decor INDICES
+      // co-op decorBreak sends name the same rock on every screen.
+      const world = generateArenaWorld(this.arena);
+      this.decor = world.decor;
+      this.setPieces = world.setPieces;
       this.zones = generateZones(this.arena);
     });
+    ArenaLife.reset(this);
     this.delayedEffects = [];
     this.projectiles = [];
     this.telegraphs = [];
@@ -2628,12 +2758,14 @@ const Game = {
   // small random reward (or nothing — see the roll below). Purely a
   // proximity trigger, same "no attack button, hugging IS the
   // interaction" philosophy as everything else in this game. Once broken
-  // it's just gone (drawDecor() skips d.broken) — no rubble sprite. ----
+  // it's just gone (ArenaLife skips d.broken and re-bakes its floor
+  // chunk via decorChanged) — no rubble sprite. ----
   mpOnDecorBreak(data) {
     if (!this.mpRunActive() || !data || !this.decor) return;
     const d = this.decor[data.i];
     if (!d || d.broken) return;
     d.broken = true;
+    ArenaLife.decorChanged(d); // re-bake the floor chunk it was drawn into
     this.particles.burst(d.x, d.y, d.c, 12, { maxSpeed: 140, minLife: 0.3, maxLife: 0.55 });
   },
   updateDestructibles() {
@@ -2646,6 +2778,7 @@ const Game = {
       if (d.kind !== "rock" && d.kind !== "crystal") continue;
       if (dist2(this.player.x, this.player.y, d.x, d.y) > breakRadius2) continue;
       d.broken = true;
+      ArenaLife.decorChanged(d); // rocks are baked into floor chunks
       // Co-op worlds are seeded identically, so an index names the same
       // rock on every screen. The reward stays with whoever broke it.
       if (this.coop) Multiplayer.send("decorBreak", { i: di });
@@ -3675,6 +3808,7 @@ const Game = {
       this.updateDeathFx(dt);
       this.updateShockwaves(dt);
       this.updateEnemyProjectiles(dt);
+      ArenaLife.update(dt, this); // the arena keeps breathing through a hitstop
       if (this.screenFlashT > 0) this.screenFlashT -= dt;
       // Our hitstop/jumpscare is personal — the shared world keeps going.
       if (this.coop) this.mpBackgroundTick(dt);
@@ -3683,6 +3817,7 @@ const Game = {
     this.updateJumpscareRoll(dt);
 
     this.elapsed += dt;
+    ArenaLife.update(dt, this); // critters, weather, reactive decor — cosmetic
 
     if (this.mode === "arcade") {
       this.timer -= dt;
@@ -3864,28 +3999,17 @@ const Game = {
     ctx.fillRect(0, 0, cam.w, cam.h);
     cam.applyShake(ctx, 1 / 60);
 
-    // pixel-art floor — the ground beneath everything else, per arena
-    drawFloor(ctx, cam, this.floor, this.arena);
+    // pixel-art floor — baked into chunks with the static decor (arena-life.js)
+    ArenaLife.drawFloor(ctx, cam, this.floor, this.arena);
 
-    drawZones(ctx, cam, this.zones);
+    // (zone tints are baked into the floor chunks now — see
+    // ArenaLife.drawZonesRegion; drawZones() stays as a helper)
 
-    const gridSize = 90;
-    const offX = -cam.x % gridSize,
-      offY = -cam.y % gridSize;
-    ctx.strokeStyle = "rgba(0,0,0,0.12)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    for (let x = offX; x < cam.w; x += gridSize) {
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, cam.h);
-    }
-    for (let y = offY; y < cam.h; y += gridSize) {
-      ctx.moveTo(0, y);
-      ctx.lineTo(cam.w, y);
-    }
-    ctx.stroke();
-
-    drawDecor(ctx, cam, this.decor);
+    // Arena Life (js/arena-life.js): set pieces, footprints and ripples,
+    // then the decor itself + grounded critters. (The old 90px grid-line
+    // overlay is gone — the floor tiles carry the sense of motion now.)
+    ArenaLife.drawGround(ctx, cam);
+    ArenaLife.drawDecor(ctx, cam);
 
     const bx = -cam.x,
       by = -cam.y;
@@ -4166,8 +4290,8 @@ const Game = {
             ctx.translate(sx, sy);
             ctx.rotate(Math.sin(bobPhase * 0.7) * 0.22);
             ctx.scale(pulse, pulse);
-            ctx.shadowColor = glowColor;
-            ctx.shadowBlur = pulse > 1 ? 16 : 9;
+            // baked glow, not a live shadowBlur (see drawGlow)
+            drawGlow(ctx, 0, 0, glowColor, pulse > 1 ? 28 : 20, pulse > 1 ? 0.8 : 0.5);
             if (Sprites.buddyLoaded) {
               // pixel-art companion sprite — tinted pink for the Best Buds synergy
               // so the two orbit tools read as visually distinct, not just recolored dots
@@ -4207,7 +4331,11 @@ const Game = {
       ctx.stroke();
     }
     if (this.particles) this.particles.draw(ctx, cam);
+    // canopies, flying critters, weather, night tint + lights — over
+    // everything in the world, still inside the camera-shake transform
+    ArenaLife.drawOverhead(ctx, cam);
     ctx.restore();
+    ArenaLife.drawScreen(ctx, cam); // vignette, aurora, lightning
 
     // Blackout event: darkens everything except a radius around the
     // player — drawn in plain screen space like the flash below, as a
@@ -4269,9 +4397,11 @@ const Game = {
       // or 'visualViewport resize' for every address-bar/UI change, and a
       // stale canvas.width/height vs. the real viewport is what causes
       // the garbled/stretched-frame class of bug (see resize() notes).
-      if (this.camera.w !== innerWidth || this.camera.h !== innerHeight) {
+      if (this._vw !== innerWidth || this._vh !== innerHeight) {
         this.resize();
       }
+      this.perfTick(ts); // adaptive resolution (CONFIG.perf.adaptive)
+      this.fpsMeterTick(ts);
       const dt = Math.min(0.05, (ts - this.lastFrame) / 1000 || 0);
       this.lastFrame = ts;
       if (this.state === "playing") this.update(dt);
